@@ -44,8 +44,10 @@ Our current approach uses custom SVG rendering with:
 ### CDN Setup
 Add to `index.html` before `app.js`:
 ```html
-<script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 ```
+
+**IMPORTANT**: Pin to specific version (5.0.0) to avoid breaking changes from auto-updates.
 
 This creates a global `LightweightCharts` object (no build step required - perfect for our static site).
 
@@ -253,7 +255,15 @@ Before committing to full migration, validate:
 - **Docs**: https://tradingview.github.io/lightweight-charts/docs
 - **Markers Tutorial**: https://tradingview.github.io/lightweight-charts/tutorials/how_to/series-markers
 - **GitHub**: https://github.com/tradingview/lightweight-charts
-- **CDN**: https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js
+- **TrendLine Plugin**: https://github.com/tradingview/lightweight-charts/tree/master/plugin-examples/src/plugins/trend-line
+- **CDN (pinned v5.0.0)**: https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js
+
+## Version Pinning Strategy
+
+**All dependencies must be pinned to specific versions** to prevent breaking changes:
+- Lightweight Charts: `5.0.0` (latest stable as of Dec 2024)
+- TrendLine plugin: Copy source code into our repo (no external dependency)
+- Future updates: Manually test and update version number only after verification
 
 ## Next Steps
 
