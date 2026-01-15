@@ -109,6 +109,7 @@ async function loadCsvPoints(path) {
     points.push([t, c]);
   }
   points.sort((a, b) => a[0] - b[0]);
+  console.log(`Loaded ${points.length} points from ${path}`);
   return points;
 }
 
@@ -365,116 +366,55 @@ function hasLowerLows(swingLows) {
 // CHART RENDERING
 // =============================================================================
 
-/**
- * Render a simple SVG line chart with optional swing high markers and trend line.
- *
- * @param {String} containerId - DOM element ID to render into
- * @param {Array} points - Array of [timestamp, price] tuples
- * @param {String} color - Line color (hex)
- * @param {String} label - Chart label (unused currently)
- * @param {Array} swingHighs - Optional array of swing highs to mark and connect
- * @param {Array} maPoints - Optional array of moving average points to overlay
- */
-function renderChart(containerId, points, color = "#4a9eff", label = "", swingHighs = null, maPoints = null) {
+function renderChartTV(containerId, points, color = "#4a9eff", label = "", swingHighs = null) {
   const container = document.getElementById(containerId);
   if (!container) return;
 
-  const width = container.clientWidth;
-  const height = container.clientHeight;
-  const padding = { top: 10, right: 10, bottom: 25, left: 50 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
+  // Clear existing chart before creating a new one
+  container.innerHTML = '';
 
-  if (points.length === 0) {
-    container.innerHTML = '<div style="padding:20px;color:#666">No data</div>';
-    return;
+  const chart = LightweightCharts.createChart(container, {
+    layout: {
+      background: { color: '#17181b' },
+      textColor: '#e9e9ea',
+    },
+    grid: {
+      vertLines: { color: '#333' },
+      horzLines: { color: '#333' },
+    },
+    width: container.clientWidth,
+    height: 150,
+  });
+
+  const lineSeries = chart.addLineSeries({
+    color: color,
+    lineWidth: 2,
+  });
+
+  const tvData = points.map(([time, value]) => ({ time, value }));
+  lineSeries.setData(tvData);
+
+  if (swingHighs && swingHighs.length > 0) {
+    const markers = swingHighs.map(sh => ({
+      time: sh.time,
+      position: 'aboveBar',
+      color: '#ffd700',
+      shape: 'circle',
+      text: '',
+    }));
+    lineSeries.setMarkers(markers);
+
+    if (swingHighs.length >= 2) {
+        const trendLine = new TrendLine(chart, lineSeries,
+            { time: swingHighs[0].time, price: swingHighs[0].price },
+            { time: swingHighs[1].time, price: swingHighs[1].price },
+            { lineColor: '#ffd700', width: 2, showLabels: false }
+        );
+        lineSeries.attachPrimitive(trendLine);
+    }
   }
 
-  // Extract values
-  const times = points.map(p => p[0]);
-  const values = points.map(p => p[1]);
-  const minVal = Math.min(...values);
-  const maxVal = Math.max(...values);
-  const minTime = times[0];
-  const maxTime = times[times.length - 1];
-
-  // Scale functions
-  const xScale = (t) => padding.left + ((t - minTime) / (maxTime - minTime)) * chartWidth;
-  const yScale = (v) => padding.top + chartHeight - ((v - minVal) / (maxVal - minVal)) * chartHeight;
-
-  // Build path
-  let path = points.map((p, i) => {
-    const x = xScale(p[0]);
-    const y = yScale(p[1]);
-    return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-  }).join(' ');
-
-  // Build MA line if provided
-  let maLine = '';
-  if (maPoints && maPoints.length > 0) {
-    maLine = maPoints.map((p, i) => {
-      const x = xScale(p[0]);
-      const y = yScale(p[1]);
-      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
-    }).join(' ');
-  }
-
-  // Build trend line or markers from swing highs
-  let trendLine = '';
-  if (swingHighs && swingHighs.length >= 2) {
-    const recentHighs = swingHighs.slice(-2); // Get last 2 swing highs
-    const x1 = xScale(recentHighs[0].time);
-    const y1 = yScale(recentHighs[0].price);
-    const x2 = xScale(recentHighs[1].time);
-    const y2 = yScale(recentHighs[1].price);
-
-    trendLine = `
-      <!-- Trend line (connecting 2 most recent swing highs) -->
-      <line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"
-            stroke="#ffd700" stroke-width="2" stroke-dasharray="4,4" opacity="0.8"/>
-      <!-- Swing high markers -->
-      <circle cx="${x1}" cy="${y1}" r="4" fill="#ffd700" opacity="0.9"/>
-      <circle cx="${x2}" cy="${y2}" r="4" fill="#ffd700" opacity="0.9"/>
-    `;
-  } else if (swingHighs && swingHighs.length === 1) {
-    // Just show the single highest point
-    const x = xScale(swingHighs[0].time);
-    const y = yScale(swingHighs[0].price);
-    trendLine = `
-      <!-- Single highest point -->
-      <circle cx="${x}" cy="${y}" r="5" fill="#ffd700" opacity="0.9"/>
-    `;
-  }
-
-  // Format dates for axis
-  const startDate = new Date(minTime * 1000).toISOString().slice(0, 10);
-  const endDate = new Date(maxTime * 1000).toISOString().slice(0, 10);
-
-  container.innerHTML = `
-    <svg width="${width}" height="${height}" style="display:block">
-      <!-- Grid lines -->
-      <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}"
-            stroke="#333" stroke-width="1"/>
-      <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}"
-            stroke="#333" stroke-width="1"/>
-
-      <!-- Chart line -->
-      <path d="${path}" fill="none" stroke="${color}" stroke-width="2" />
-
-      <!-- Moving average line (if provided) -->
-      ${maLine ? `<path d="${maLine}" fill="none" stroke="#9ca3af" stroke-width="1.5" stroke-dasharray="3,3" opacity="0.7" />` : ''}
-
-      ${trendLine}
-
-      <!-- Y-axis labels -->
-      <text x="${padding.left - 5}" y="${padding.top + 5}" text-anchor="end" fill="#a7a7ad" font-size="11">${maxVal.toFixed(2)}</text>
-      <text x="${padding.left - 5}" y="${height - padding.bottom + 5}" text-anchor="end" fill="#a7a7ad" font-size="11">${minVal.toFixed(2)}</text>
-
-      <!-- X-axis labels -->
-      <text x="${padding.left}" y="${height - padding.bottom + 18}" text-anchor="start" fill="#a7a7ad" font-size="11">${startDate}</text>
-      <text x="${width - padding.right}" y="${height - padding.bottom + 18}" text-anchor="end" fill="#a7a7ad" font-size="11">${endDate}</text>
-    </svg>
-  `;
+  return chart;
 }
 
 // =============================================================================
@@ -531,23 +471,15 @@ function analyzePair(pairId, symbol1, symbol2, color1, color2) {
   if (elSignal) elSignal.textContent = signal;
 
   // Render charts
-  renderChart(`chart-${pairId}-${symbol1.toLowerCase()}`, recent1, color1, symbol1, top2_1);
-  renderChart(`chart-${pairId}-${symbol2.toLowerCase()}`, recent2, color2, symbol2, top2_2);
+  renderChartTV(`chart-${pairId}-${symbol1.toLowerCase()}`, recent1, color1, symbol1, top2_1);
+  renderChartTV(`chart-${pairId}-${symbol2.toLowerCase()}`, recent2, color2, symbol2, top2_2);
 
   // Calculate and render ratio chart with 50-day MA
   const ratioPoints = calculateRatio(recent1, recent2);
   const ratioTop2 = PIVOT_MODE === "highest-to-current"
     ? findHighestToCurrentLine(ratioPoints, barsEachSide)
     : findRecentPivotHighs(ratioPoints, 2, barsEachSide, PIVOT_MODE);
-
-  // Calculate 50-day MA for ratio (use full dataset, not just recent)
-  const fullRatio = calculateRatio(pts1, pts2);
-  const ratioMA50 = calculateMA(fullRatio, 50);
-
-  // Filter MA to match the lookback period for display
-  const recentMA = ratioMA50.filter(p => p[0] >= ratioPoints[0][0]);
-
-  renderChart(`chart-${pairId}-ratio`, ratioPoints, "#a78bfa", `${symbol1}/${symbol2}`, ratioTop2, recentMA);
+  renderChartTV(`chart-${pairId}-ratio`, ratioPoints, "#a78bfa", `${symbol1}/${symbol2}`, ratioTop2);
 }
 
 function calculateTrend(swingHighs) {
