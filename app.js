@@ -425,7 +425,7 @@ function renderChartTV(containerId, points, color = "#4a9eff", label = "", swing
     const ma50Series = chart.addSeries(LineSeries, {
       color: '#ffffff',
       lineWidth: 1,
-      lineStyle: 1, // Dotted
+      lineStyle: 4, // Sparse Dotted
       priceLineVisible: false,
       lastValueVisible: false,
     });
@@ -618,44 +618,35 @@ function calculateRiskScore() {
   let score = 0;
   const signals = [];
 
-  for (const pair of PAIRS) {
-    const symbol1 = pair.symbol1.toLowerCase();
-    const symbol2 = pair.symbol2.toLowerCase();
+  for (const sym of SYMBOLS) {
+    const pts = dataCache[sym];
+    if (!pts || pts.length === 0) continue;
 
-    const pts1 = dataCache[symbol1];
-    const pts2 = dataCache[symbol2];
+    const ma50 = calculateMA(pts, 50);
+    if (ma50.length === 0) continue;
 
-    if (!pts1 || !pts2 || pts1.length === 0 || pts2.length === 0) {
-      continue;
-    }
+    const currentPrice = pts[pts.length - 1][1];
+    const currentMA = ma50[ma50.length - 1][1];
+    const label = sym.toUpperCase();
 
-    const fullRatio = calculateRatio(pts1, pts2);
-    const ratioMA50 = calculateMA(fullRatio, 50);
-
-    if (fullRatio.length === 0 || ratioMA50.length === 0) {
-      continue;
-    }
-
-    const currentRatio = fullRatio[fullRatio.length - 1][1];
-    const currentMA = ratioMA50[ratioMA50.length - 1][1];
-
-    if (currentRatio > currentMA) {
+    if (currentPrice > currentMA) {
       score += 1;
-      signals.push(`${pair.symbol1}/${pair.symbol2}: Above MA ✓`);
+      signals.push(`${label}: Above 50 MA ✓`);
     } else {
       score -= 1;
-      signals.push(`${pair.symbol1}/${pair.symbol2}: Below MA ✗`);
+      signals.push(`${label}: Below 50 MA ✗`);
     }
   }
 
+  const total = SYMBOLS.length;
   let signal = "";
-  if (score >= 5) {
+  if (score >= Math.ceil(total * 0.7)) {
     signal = "🟢 STRONG RISK ON";
-  } else if (score >= 2) {
+  } else if (score >= Math.ceil(total * 0.3)) {
     signal = "🟡 RISK ON";
-  } else if (score >= -1) {
+  } else if (score >= -Math.ceil(total * 0.3)) {
     signal = "⚪ NEUTRAL";
-  } else if (score >= -4) {
+  } else if (score >= -Math.ceil(total * 0.7)) {
     signal = "🟠 RISK OFF";
   } else {
     signal = "🔴 STRONG RISK OFF";
@@ -690,7 +681,10 @@ function analyzeAndRender() {
   }
 
   if (detailsElement) {
-    detailsElement.innerHTML = riskScore.details.map(d => `<div class="risk-detail-item">${d}</div>`).join('');
+    detailsElement.innerHTML = riskScore.details.map(d => {
+      const above = d.includes('✓');
+      return `<span style="padding:3px 8px;border-radius:4px;background:${above ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'};color:${above ? '#4ade80' : '#f87171'}">${d}</span>`;
+    }).join('');
   }
 }
 
