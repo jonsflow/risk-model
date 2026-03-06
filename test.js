@@ -1,4 +1,4 @@
-const { createChart, LineSeries } = window.LightweightCharts;
+const { createChart, LineSeries, createSeriesMarkers } = window.LightweightCharts;
 
 async function loadCsvPoints(path) {
   const r = await fetch(path, { cache: "no-store" });
@@ -64,7 +64,7 @@ async function loadCsvPoints(path) {
       shape: 'circle',
       text: '',
     }));
-    lineSeries.setMarkers(markers);
+    createSeriesMarkers(lineSeries, markers);
 
     // Add trend line
     const trendLine = new TrendLine(chart, lineSeries,
