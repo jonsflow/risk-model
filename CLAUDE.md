@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Risk Divergence Dashboard is a static GitHub Pages site that analyzes divergence signals across multiple asset pairs (equities, bonds, gold, crypto) entirely in the browser. The project uses GitHub Actions to fetch both hourly and daily CSV data from Yahoo Finance using the yfinance Python library, and the webpage performs client-side CSV parsing, pivot detection, and divergence analysis using vanilla JavaScript.
+Risk Divergence Dashboard is a static GitHub Pages site that displays divergence signals across multiple asset pairs (equities, bonds, gold, crypto). GitHub Actions fetches CSV data from Yahoo Finance, runs Python analysis (`generate_cache.py`), and writes precomputed JSON cache files. The browser fetches a single cache file and renders it — no client-side analysis.
 
-**Key insight**: This is a fully static site. GitHub Pages serves HTML, CSS, JS, and CSV files as static assets. The browser fetches and processes the CSV files entirely client-side - no backend server required.
+**Key insight**: Python is the single source of truth for all analysis (pivot detection, divergence signals, regime scoring). JS is a pure renderer. This prevents logic drift between Python and JS. If cache is missing, the page shows a clear error — no silent fallback to client-side computation.
+
+**Key insight**: This is a fully static site. GitHub Pages serves HTML, CSS, JS, CSV, and JSON files as static assets. No backend server required.
 
 ## Architecture
 
@@ -16,8 +18,9 @@ Risk Divergence Dashboard is a static GitHub Pages site that analyzes divergence
 3. **Fetches TWO datasets per symbol**:
    - Hourly data: Last 1 month (~143 bars for stocks, ~700 for crypto) → `data/{symbol}_hourly.csv`
    - Daily data: Max available history (thousands of bars) → `data/{symbol}.csv`
-4. Commits CSV files if changes are detected
-5. GitHub Pages serves everything as static content (HTML + CSS + JS + CSV files)
+4. Runs `generate_cache.py` to precompute all analysis → `data/cache/*.json`
+5. Commits CSV + cache files if changes are detected
+6. GitHub Pages serves everything as static content (HTML + CSS + JS + CSV + JSON files)
 
 ### Symbols Fetched
 - **SPY**: S&P 500 ETF
@@ -29,19 +32,15 @@ Risk Divergence Dashboard is a static GitHub Pages site that analyzes divergence
 - **BTC**: Bitcoin (BTC-USD) - trades 24/7, so hourly data has ~700 bars
 
 ### Client-Side Processing
-1. `index.html` contains HTML structure
+1. `index.html` / `macro.html` contain HTML structure
 2. `styles.css` contains all styling
-3. `app.js` contains all logic (modular, configuration-based)
+3. `app.js` / `macro_app.js` are pure renderers — no analysis logic
 4. On page load:
-   - Fetches both hourly and daily CSV files via `fetch()` with `cache: "no-store"`
-   - Parses CSV client-side (no dependencies, pure JavaScript)
-   - **Currently uses daily data for all lookback periods** (20/50/100 days)
-   - Hourly data is loaded but not actively used (available for future enhancements)
-5. Detects swing highs (pivot points) using configurable methods:
-   - "Last 2 chronologically" (default)
-   - "2 highest by price"
-   - "Highest high → Last close"
-6. Compares trends between paired assets to detect divergence
+   - Fetches precomputed cache JSON from `data/cache/` via `fetch()` with `cache: "no-store"`
+   - Fetches hourly and daily CSV files (needed for TradingView chart rendering on divergence page)
+   - Applies cached signals, trends, pivots, and regime scores to DOM
+   - If cache file is missing: throws with message "Cache missing — run: python3 generate_cache.py"
+5. Dropdown changes (lookback, pivot mode, swing window) fetch a different cache file — no recomputation
 
 ### Divergence Pairs (Modular Configuration)
 Pairs are defined in `app.js` in the `PAIRS` array:
@@ -52,7 +51,7 @@ Pairs are defined in `app.js` in the `PAIRS` array:
 - **BTC ↔ SPY**: Crypto vs equities
 - **BTC ↔ GLD**: Crypto vs gold
 
-**Adding new pairs**: Just add one line to the `PAIRS` array - no HTML changes needed!
+**Adding new pairs**: Add to `config.json` and re-run `generate_cache.py` — no HTML changes needed!
 
 ### Signal Logic
 - **Bearish divergence**: Asset 1 makes higher highs while Asset 2 makes lower highs
@@ -66,17 +65,18 @@ Default parameters (configurable via dropdown):
 
 ## Development Commands
 
-### Fetching Data Locally
+### Fetching Data and Generating Cache Locally
 ```bash
 # Install yfinance (one-time)
 pip install yfinance
 
 # Fetch both hourly and daily data for all symbols
 python3 fetch_data.py
+# Creates: data/spy.csv, data/spy_hourly.csv, etc.
 
-# This creates/updates files in data/:
-#   - spy.csv, hyg.csv, qqq.csv, tlt.csv, gld.csv, iwm.csv, btc.csv (daily)
-#   - spy_hourly.csv, hyg_hourly.csv, etc. (hourly)
+# Generate precomputed cache files (required — JS has no analysis fallback)
+python3 generate_cache.py
+# Creates: data/cache/divergence_*.json, data/cache/macro_*.json
 ```
 
 ### Triggering Data Updates (GitHub Actions)
@@ -108,7 +108,7 @@ php -S localhost:8000
 
 Then visit `http://localhost:8000` in your browser.
 
-**Note**: Local testing requires the `data/` directory with CSV files to exist. Run `python3 fetch_data.py` first to generate them.
+**Note**: Local testing requires both CSV files and cache files. Run `python3 fetch_data.py` then `python3 generate_cache.py` first.
 
 ### Workflow Testing
 To test workflow changes without waiting for the schedule:
@@ -120,16 +120,24 @@ To test workflow changes without waiting for the schedule:
 
 ```
 .
-├── index.html                          # HTML structure (minimal, pairs generated dynamically)
+├── index.html                          # Divergence dashboard HTML
+├── macro.html                          # Macro model dashboard HTML
 ├── styles.css                          # All CSS styling
-├── app.js                              # All client-side logic (modular, config-driven)
-├── fetch_data.py                       # Python script to fetch hourly + daily data from Yahoo Finance
-├── data/                               # Generated by GitHub Actions (or locally via fetch_data.py)
+├── app.js                              # Divergence page renderer (pure renderer, no analysis)
+├── macro_app.js                        # Macro page renderer (pure renderer, no analysis)
+├── config.json                         # Divergence pairs + symbol config
+├── macro_config.json                   # Macro model categories + assets
+├── fetch_data.py                       # Fetches hourly + daily CSVs from Yahoo Finance
+├── generate_cache.py                   # Runs all analysis, writes data/cache/*.json
+├── data/                               # Generated by GitHub Actions
 │   ├── spy.csv, hyg.csv, etc.          # Daily OHLCV data (max history)
-│   └── spy_hourly.csv, etc.            # Hourly OHLCV data (last 1 month)
+│   ├── spy_hourly.csv, etc.            # Hourly OHLCV data (last 1 month)
+│   └── cache/                          # Precomputed JSON cache files
+│       ├── divergence_*.json           # Per-combination divergence results
+│       └── macro_*.json                # Per-combination macro regime results
 ├── .github/
 │   └── workflows/
-│       └── update-data.yml             # Scheduled data fetching workflow
+│       └── update-data.yml             # Scheduled data fetching + cache generation
 ├── CLAUDE.md                           # This file
 └── README.md                           # Project documentation
 ```
@@ -155,64 +163,62 @@ Date,Time,Open,High,Low,Close,Volume
 2024-01-01,09:30:00,450.00,451.00,449.50,450.25,500000
 ```
 
-### Client-Side Calculations (app.js)
-- **loadCsvPoints()** (`app.js:32`): Parses daily CSV, extracts Date and Close columns
-- **loadHourlyData()** (`app.js:65`): Parses hourly CSV with Date, Time, Close
-- **findPivotHighs()** (`app.js:117`): ThinkScript-style pivot detection
-- **findRecentPivotHighs()** (`app.js:164`): Configurable pivot selection (highest/recent/highest-to-current)
-- **renderChart()** (`app.js:289`): SVG chart rendering with pivot markers and trend lines
-- **analyzePair()** (`app.js:423`): Analyzes divergence for a symbol pair
+### Client-Side Functions (app.js — pure renderer)
+- **loadCsvPoints()**: Parses daily CSV → `[timestamp, price]` array (used for chart data)
+- **loadHourlyData()**: Parses hourly CSV (loaded into dataCache, available for charts)
+- **calculateMA()**: Computes moving average for chart MA overlay only
+- **renderChartTV()**: TradingView chart with price area, MA line, and pivot trend line
+- **applyDivergenceCache()**: Reads cache JSON, populates trend/signal DOM elements, renders charts
+- **loadAndRender()**: Fetches `data/cache/divergence_{lookback}_{mode}_{swing}.json`, calls applyDivergenceCache
+
+### Client-Side Functions (macro_app.js — pure renderer)
+- **renderSparkline()**: SVG sparkline with MA overlay using pre-computed price/MA points from cache
+- **renderAssetCard()**: Renders individual asset card from cache data (price, pct change, signal)
+- **applyMacroCache()**: Reads cache JSON, populates regime score, breadth bars, and asset cards
+- **loadAndRender()**: Fetches `data/cache/macro_{lookback}_{ma}.json`, calls applyMacroCache
 
 ### Modular Architecture
-- **PAIRS array** (`app.js:13-20`): Configuration for all divergence pairs
-- **generatePairHTML()** (`app.js:528`): Dynamically generates HTML for each pair
-- **renderPairColumns()** (`app.js:565`): Injects pair UI into DOM on page load
-- **analyzeAndRender()** (`app.js:572`): Loops through PAIRS config and analyzes each
+- **config.json**: All divergence pairs and symbol definitions (source of truth for app.js)
+- **macro_config.json**: All macro categories and assets (source of truth for macro_app.js)
+- **generatePairHTML()**: Dynamically generates HTML for each pair from config
+- **renderPairColumns()**: Injects pair UI into DOM on page load
 
 ### GitHub Actions Concurrency
 The workflow uses `concurrency.cancel-in-progress: false` to prevent overlapping runs from stomping on each other during git operations. This is critical for data integrity.
 
 ## Adding New Divergence Pairs
 
-To add a new pair, simply edit the `PAIRS` array in `app.js`:
+1. Add the pair to `config.json` under `"pairs"` and the symbol under `"symbols"`
+2. Add the symbol to `fetch_data.py` (including any Yahoo Finance ticker mapping)
+3. Fetch data and regenerate cache:
 
-```javascript
-const PAIRS = [
-  { id: "spy-hyg", symbol1: "SPY", symbol2: "HYG", color1: "#4a9eff", color2: "#ff6b6b" },
-  // ... existing pairs ...
-
-  // Add your new pair:
-  { id: "eth-btc", symbol1: "ETH", symbol2: "BTC", color1: "#627eea", color2: "#f7931a" }
-];
+```bash
+python3 fetch_data.py
+python3 generate_cache.py
 ```
 
-Then add the symbols to `fetch_data.py`:
-
-```python
-SYMBOLS = ['SPY', 'HYG', 'QQQ', 'TLT', 'GLD', 'IWM', 'BTC', 'ETH']
-
-# If needed, map to Yahoo Finance ticker:
-TICKER_MAP = {
-    'BTC': 'BTC-USD',
-    'ETH': 'ETH-USD'
-}
-```
-
-That's it! No HTML changes needed - the UI is generated dynamically.
+No HTML changes needed — the UI is generated dynamically from config.
 
 ## Modifying the Divergence Logic
 
-Parameters are configurable via dropdowns in the UI:
-- **Lookback Period**: 20, 50, or 100 days (edit `index.html` to add more options)
-- **Pivot Selection**: "Last 2 chronologically", "2 highest by price", "HH → Last Close"
-- **Swing Window**: Auto-scale or manual (2, 3, 5, 7, 10 days)
+All analysis logic lives in `generate_cache.py`. After any change to analysis logic, re-run:
 
-To change defaults, edit the config at the top of `app.js`:
+```bash
+python3 generate_cache.py
+```
 
-```javascript
-let LOOKBACK_DAYS = 20;   // default lookback
-let PIVOT_MODE = "recent";  // default pivot mode
-let SWING_WINDOW_DAYS = null;  // default swing window (null = auto)
+Parameters are configurable via dropdowns in the UI (lookback period, pivot mode, swing window). Each combination maps to a precomputed cache file. To add new dropdown options, update both `index.html` and ensure `generate_cache.py` generates the corresponding cache files for each new combination.
+
+To change defaults, edit `config.json`:
+
+```json
+{
+  "defaults": {
+    "lookback_days": 20,
+    "pivot_mode": "recent",
+    "swing_window_days": null
+  }
+}
 ```
 
 ## GitHub Pages Setup
@@ -227,33 +233,15 @@ The site will be available at `https://<username>.github.io/<repo-name>/`
 ## Common Gotchas
 
 1. **CORS errors during local development**: Must use a local HTTP server, not `file://` protocol. On GitHub Pages this is not an issue.
-2. **Missing data files locally**: Run `python3 fetch_data.py` first to generate CSV files in the `data/` directory
-3. **Stale data in browser**: CSV files are fetched with `cache: "no-store"`, but browser DevTools may override this
-4. **Workflow schedule is UTC**: The cron `0 21 * * 1-5` runs at 21:00 UTC on weekdays (4 PM ET during EST, 5 PM ET during EDT)
-5. **Data not appearing**: Ensure the workflow has run at least once (check Actions tab for green checkmark)
-6. **Bitcoin has 24/7 data**: BTC trades around the clock, so hourly data has ~700 bars vs ~143 for stocks
-7. **Yahoo Finance rate limits**: If fetching fails, wait a few minutes and retry. The free tier is generally reliable for this use case.
-8. **Adding new symbols**: Must update BOTH `fetch_data.py` and `app.js` PAIRS array, plus add symbol to data loader in `app.js` main()
+2. **Missing cache files locally**: Run `python3 fetch_data.py` then `python3 generate_cache.py` — JS has no analysis fallback and will show an error without cache files.
+3. **Blank page / "Cache missing" error**: Cache file not found for the current dropdown combination. Re-run `python3 generate_cache.py`.
+4. **Stale data in browser**: Files are fetched with `cache: "no-store"`, but browser DevTools may override this.
+5. **Workflow schedule is UTC**: The cron `0 21 * * 1-5` runs at 21:00 UTC on weekdays (4 PM ET during EST, 5 PM ET during EDT)
+6. **Data not appearing**: Ensure the workflow has run at least once (check Actions tab for green checkmark)
+7. **Bitcoin has 24/7 data**: BTC trades around the clock, so hourly data has ~700 bars vs ~143 for stocks
+8. **Yahoo Finance rate limits**: If fetching fails, wait a few minutes and retry. The free tier is generally reliable for this use case.
+9. **Adding new symbols**: Update `fetch_data.py`, `config.json` (or `macro_config.json`), then re-run both `fetch_data.py` and `generate_cache.py`.
 
 ## Using Hourly Data (Future Enhancement)
 
-Hourly data is currently fetched but not actively used. To enable hourly analysis for the 20-day lookback:
-
-1. Change `analyzePair()` in `app.js` line ~424:
-```javascript
-// Change from:
-const pts1 = dataCache[symbol1.toLowerCase()];
-
-// To:
-const useHourly = LOOKBACK_DAYS === 20;
-const pts1 = dataCache[symbol1.toLowerCase() + (useHourly ? '_hourly' : '')];
-const pts2 = dataCache[symbol2.toLowerCase() + (useHourly ? '_hourly' : '')];
-```
-
-2. Update the data selection to use all hourly bars:
-```javascript
-const recent1 = useHourly ? pts1 : last(pts1, LOOKBACK_DAYS);
-const recent2 = useHourly ? pts2 : last(pts2, LOOKBACK_DAYS);
-```
-
-This will use hourly granularity for 20-day analysis while keeping daily data for 50/100-day lookbacks.
+Hourly CSVs are fetched and loaded into `dataCache` (as `{sym}_hourly`) but not used for analysis. To enable hourly analysis for the 20-day lookback, update `generate_cache.py` to use hourly data when `lookback == 20`, then re-run `python3 generate_cache.py`. The JS renderer requires no changes — it renders whatever pivots/signals the cache provides.

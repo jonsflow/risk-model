@@ -32,11 +32,15 @@ jobs:
       - name: Fetch hourly + daily data from Yahoo Finance
         run: python3 fetch_data.py
 
+      - name: Generate analysis cache
+        run: python3 generate_cache.py
+
       - name: Commit changes (if any)
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
           git add data/*.csv data/last_updated.txt
+          git add data/cache/
           git diff --cached --quiet || git commit -m "Update data (Yahoo Finance)"
           git pull --rebase origin main
           git push

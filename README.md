@@ -1,8 +1,8 @@
 # Risk Divergence Dashboard
 
-**Static GitHub Pages site** that analyzes divergence signals across multiple asset pairs (equities, bonds, gold, crypto) entirely in the browser.
+**Static GitHub Pages site** that displays divergence signals across multiple asset pairs (equities, bonds, gold, crypto).
 
-Uses **GitHub Actions** to fetch both hourly and daily data from **Yahoo Finance** (via `yfinance`), and performs client-side pivot detection and divergence analysis using vanilla JavaScript.
+Uses **GitHub Actions** to fetch data from **Yahoo Finance** (via `yfinance`), run Python analysis, and precompute results into JSON cache files. The browser fetches a single cache file and renders it — no client-side analysis required.
 
 🔗 **[Live Demo](https://jonsflow.github.io/risk-divergence/)**
 
@@ -28,9 +28,13 @@ Uses **GitHub Actions** to fetch both hourly and daily data from **Yahoo Finance
 - Daily data: Max available history (thousands of bars)
 - Currently uses daily data; hourly available for future enhancements
 
+✅ **Python as Single Source of Truth**:
+- All pivot detection, divergence, and regime logic lives in `generate_cache.py`
+- JS is a pure renderer — reads precomputed cache JSON, no analysis code
+- Cache missing = clear error message, no silent wrong results
+
 ✅ **Fully Static**:
 - No backend required
-- Pure client-side JavaScript
 - Deployed on GitHub Pages
 
 ---
@@ -50,13 +54,16 @@ After the workflow commits the CSV files, visit your GitHub Pages URL.
 
 ## Local Development
 
-### Fetch Data Locally
+### Fetch Data and Generate Cache Locally
 ```bash
-# Install yfinance (one-time)
+# Install dependencies (one-time)
 pip install yfinance
 
 # Fetch both hourly and daily data
 python3 fetch_data.py
+
+# Generate precomputed cache files (required — JS has no analysis fallback)
+python3 generate_cache.py
 ```
 
 ### Run Local Server
@@ -74,39 +81,34 @@ Then visit `http://localhost:8000`
 
 ## Adding New Pairs
 
-Edit the `PAIRS` array in `app.js`:
+1. Edit `config.json` to add the pair and symbol
+2. Add the symbol to `fetch_data.py`
+3. Re-run data fetch and cache generation:
 
-```javascript
-const PAIRS = [
-  // ... existing pairs ...
-  { id: "eth-btc", symbol1: "ETH", symbol2: "BTC", color1: "#627eea", color2: "#f7931a" }
-];
+```bash
+python3 fetch_data.py
+python3 generate_cache.py
 ```
 
-Add symbols to `fetch_data.py`:
-
-```python
-SYMBOLS = ['SPY', 'HYG', 'QQQ', 'TLT', 'GLD', 'IWM', 'BTC', 'ETH']
-
-TICKER_MAP = {
-    'BTC': 'BTC-USD',
-    'ETH': 'ETH-USD'
-}
-```
-
-That's it! The UI is generated dynamically.
+The UI is generated dynamically from config — no HTML changes needed.
 
 ---
 
 ## Files
 
 ```
-├── index.html          # HTML structure (minimal, pairs generated dynamically)
-├── styles.css          # All styling
-├── app.js              # Client-side logic (modular, config-driven)
-├── fetch_data.py       # Python script to fetch data from Yahoo Finance
-├── data/               # Generated CSV files (hourly + daily)
-└── .github/workflows/  # Scheduled data fetching
+├── index.html              # HTML structure (minimal, pairs generated dynamically)
+├── macro.html              # Macro model dashboard
+├── styles.css              # All styling
+├── app.js                  # Divergence page renderer (reads cache, no analysis)
+├── macro_app.js            # Macro page renderer (reads cache, no analysis)
+├── fetch_data.py           # Fetches hourly + daily CSVs from Yahoo Finance
+├── generate_cache.py       # Runs all analysis, writes data/cache/*.json
+├── config.json             # Divergence pairs and symbol configuration
+├── macro_config.json       # Macro model categories and assets
+├── data/                   # Generated CSV files (hourly + daily)
+│   └── cache/              # Precomputed JSON cache files (45+ files)
+└── .github/workflows/      # Scheduled data fetching + cache generation
 ```
 
 ---
@@ -117,7 +119,7 @@ That's it! The UI is generated dynamically.
 - **Hosting**: GitHub Pages
 - **Automation**: GitHub Actions (runs daily at 4 PM ET market close)
 - **Frontend**: Vanilla JavaScript (no frameworks)
-- **Charts**: Custom SVG rendering
+- **Charts**: TradingView Lightweight Charts (divergence page), custom SVG sparklines (macro page)
 
 ---
 
