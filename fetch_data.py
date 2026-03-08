@@ -10,6 +10,7 @@ Reads configuration from config.json to determine which symbols to fetch.
 """
 
 import yfinance as yf
+import pandas as pd
 import sys
 import json
 from pathlib import Path
@@ -104,29 +105,48 @@ def fetch_hourly(symbol, ticker_map, data_dir):
     print(f"✓ {symbol} hourly: {len(output_df)} bars → {csv_path}", file=sys.stderr)
 
 def fetch_daily(symbol, ticker_map, data_dir):
-    """Fetch daily data (max available history)"""
+    """Fetch daily data — incremental if existing CSV present, else full max history."""
+    csv_path = data_dir / f'{symbol.lower()}.csv'
+
+    # Read last date from existing CSV for incremental fetch
+    last_date = None
+    existing_df = None
+    if csv_path.exists():
+        try:
+            existing_df = pd.read_csv(csv_path)
+            if not existing_df.empty:
+                last_date = existing_df['Date'].iloc[-1]
+        except Exception:
+            pass
+
     ticker_symbol = ticker_map.get(symbol, symbol)
     ticker = yf.Ticker(ticker_symbol)
-    df = ticker.history(period='max', interval='1d')
+
+    if last_date:
+        # Fetch only from last known date (inclusive, so corrections are captured too)
+        df = ticker.history(start=last_date, interval='1d')
+    else:
+        df = ticker.history(period='max', interval='1d')
 
     if df.empty:
         print(f"WARNING: No daily data returned for {symbol}", file=sys.stderr)
         return
 
-    # Reset index to get Date as a column
     df = df.reset_index()
-
-    # Format date as YYYY-MM-DD
     df['Date'] = df['Date'].dt.strftime('%Y-%m-%d')
+    new_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
 
-    # Format: Date,Open,High,Low,Close,Volume (no Time column for daily)
-    output_df = df[['Date', 'Open', 'High', 'Low', 'Close', 'Volume']]
+    if last_date and existing_df is not None:
+        # Drop overlapping rows from existing, append fresh rows
+        existing_df = existing_df[existing_df['Date'] < new_df['Date'].iloc[0]]
+        combined_df = pd.concat([existing_df, new_df], ignore_index=True)
+        added = len(combined_df) - len(existing_df)
+        print(f"✓ {symbol} daily: +{added} new bars (total {len(combined_df)}) → {csv_path}", file=sys.stderr)
+    else:
+        combined_df = new_df
+        print(f"✓ {symbol} daily: {len(combined_df)} bars → {csv_path}", file=sys.stderr)
 
-    # Save to {symbol}.csv (same as before)
-    csv_path = data_dir / f'{symbol.lower()}.csv'
-    output_df.to_csv(csv_path, index=False)
-
-    print(f"✓ {symbol} daily: {len(output_df)} bars → {csv_path}", file=sys.stderr)
+    combined_df.to_csv(csv_path, index=False)
 
 def main():
     # Load configuration from both config files

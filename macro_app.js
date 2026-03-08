@@ -193,6 +193,130 @@ function renderAssetCard(assetData, color, maPeriod) {
 }
 
 // =============================================================================
+// REGIME CARD RENDERING
+// =============================================================================
+
+const FLAG_META = {
+  carry_risk:       { label: '⚡ CARRY RISK',   color: '#f59e0b' },
+  inflation_regime: { label: '📈 INFLATION',     color: '#ef4444' },
+  credit_stress:    { label: '💥 CREDIT STRESS', color: '#ef4444' },
+  china_divergence: { label: '🌐 CHINA',         color: '#8b5cf6' },
+  vol_spike:        { label: '📊 VOL SPIKE',      color: '#f59e0b' },
+};
+
+const GROWTH_ASSETS = [
+  { sym: 'HYG',     w: '2.0' },
+  { sym: 'IWM',     w: '1.5' },
+  { sym: 'SPY',     w: '1.0' },
+  { sym: 'EEM',     w: '1.0' },
+  { sym: 'EMB',     w: '1.0' },
+  { sym: 'XLY>XLP', w: '1.0' },
+];
+const INFLATION_ASSETS = [
+  { sym: 'TIP',   w: '2.0' },
+  { sym: 'TLT↓',  w: '1.5' },
+  { sym: 'GLD',   w: '1.0' },
+  { sym: 'USO',   w: '1.0' },
+  { sym: 'DBC',   w: '1.0' },
+];
+
+function buildRegimeMapSVG(rc) {
+  const W = 180, H = 136;
+  const PAD = { top: 12, right: 8, bottom: 20, left: 28 };
+  const cw = W - PAD.left - PAD.right;
+  const ch = H - PAD.top - PAD.bottom;
+  const midX = PAD.left + cw / 2;
+  const midY = PAD.top  + ch / 2;
+
+  const dotX = (PAD.left + (rc.inflation.pct / 100) * cw).toFixed(1);
+  const dotY = (PAD.top  + (1 - rc.growth.pct / 100) * ch).toFixed(1);
+
+  return `
+    <rect x="${PAD.left}" y="${PAD.top}"  width="${cw/2}" height="${ch/2}" fill="rgba(16,185,129,0.09)"/>
+    <rect x="${midX}"     y="${PAD.top}"  width="${cw/2}" height="${ch/2}" fill="rgba(234,179,8,0.09)"/>
+    <rect x="${PAD.left}" y="${midY}"     width="${cw/2}" height="${ch/2}" fill="rgba(59,130,246,0.09)"/>
+    <rect x="${midX}"     y="${midY}"     width="${cw/2}" height="${ch/2}" fill="rgba(239,68,68,0.09)"/>
+
+    <rect x="${PAD.left}" y="${PAD.top}" width="${cw}" height="${ch}" fill="none" stroke="#2a2b2f" stroke-width="1"/>
+    <line x1="${midX}"     y1="${PAD.top}"    x2="${midX}"        y2="${PAD.top+ch}" stroke="#2a2b2f" stroke-width="1"/>
+    <line x1="${PAD.left}" y1="${midY}"       x2="${PAD.left+cw}" y2="${midY}"       stroke="#2a2b2f" stroke-width="1"/>
+
+    <text x="${PAD.left+cw*0.25}" y="${PAD.top+ch*0.25}" text-anchor="middle" dominant-baseline="middle" fill="#10b981" font-size="8" font-weight="600" opacity="0.85">GOLDILOCKS</text>
+    <text x="${PAD.left+cw*0.75}" y="${PAD.top+ch*0.25}" text-anchor="middle" dominant-baseline="middle" fill="#eab308" font-size="8" font-weight="600" opacity="0.85">INF. BOOM</text>
+    <text x="${PAD.left+cw*0.25}" y="${PAD.top+ch*0.75}" text-anchor="middle" dominant-baseline="middle" fill="#3b82f6" font-size="8" font-weight="600" opacity="0.85">RECESSION</text>
+    <text x="${PAD.left+cw*0.75}" y="${PAD.top+ch*0.75}" text-anchor="middle" dominant-baseline="middle" fill="#ef4444" font-size="8" font-weight="600" opacity="0.85">STAGFLATION</text>
+
+    <line x1="${dotX}" y1="${PAD.top}"    x2="${dotX}"        y2="${PAD.top+ch}" stroke="#e9e9ea" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.35"/>
+    <line x1="${PAD.left}" y1="${dotY}"   x2="${PAD.left+cw}" y2="${dotY}"       stroke="#e9e9ea" stroke-width="0.5" stroke-dasharray="2,2" opacity="0.35"/>
+    <circle cx="${dotX}" cy="${dotY}" r="4.5" fill="#e9e9ea" stroke="#0f0f10" stroke-width="1.5"/>
+
+    <text x="${PAD.left+cw/2}" y="${H-4}" text-anchor="middle" fill="#a7a7ad" font-size="8">Inflation →</text>
+    <text x="8" y="${PAD.top+ch/2}" text-anchor="middle" dominant-baseline="middle" fill="#a7a7ad" font-size="8" transform="rotate(-90 8 ${PAD.top+ch/2})">Growth ↑</text>
+  `;
+}
+
+function renderRegimeCard(rc) {
+  const el = document.getElementById('regime-card');
+  if (!el) return;
+
+  const activeFlags = Object.entries(rc.flags)
+    .filter(([, v]) => v)
+    .map(([k]) => FLAG_META[k])
+    .filter(Boolean);
+
+  const flagsHTML = activeFlags.length > 0
+    ? `<div class="regime-flags">${activeFlags.map(f =>
+        `<span class="regime-flag" style="background:${f.color}22;color:${f.color}">${f.label}</span>`
+      ).join('')}</div>`
+    : '';
+
+  const growthRows = GROWTH_ASSETS.map(a =>
+    `<div class="rw-item"><span class="rw-sym">${a.sym}</span><span class="rw-w">${a.w}</span></div>`
+  ).join('');
+  const inflationRows = INFLATION_ASSETS.map(a =>
+    `<div class="rw-item"><span class="rw-sym">${a.sym}</span><span class="rw-w">${a.w}</span></div>`
+  ).join('');
+
+  el.innerHTML = `
+    <div class="regime-card">
+      <div class="regime-quadrant">Regime: ${rc.quadrant}</div>
+      <div class="regime-axes">
+        <div class="regime-axis">
+          <span class="regime-axis-label">Growth</span>
+          <div class="regime-axis-track">
+            <div class="regime-axis-fill" style="width:${rc.growth.pct}%;background:#10b981"></div>
+          </div>
+          <span class="regime-axis-pct">${rc.growth.pct}%</span>
+        </div>
+        <div class="regime-axis">
+          <span class="regime-axis-label">Inflation</span>
+          <div class="regime-axis-track">
+            <div class="regime-axis-fill" style="width:${rc.inflation.pct}%;background:#ef4444"></div>
+          </div>
+          <span class="regime-axis-pct">${rc.inflation.pct}%</span>
+        </div>
+      </div>
+      ${flagsHTML}
+      <div class="regime-explainer">
+        <svg class="regime-map-svg" viewBox="0 0 180 136" width="180" height="136">
+          ${buildRegimeMapSVG(rc)}
+        </svg>
+        <div class="regime-weights">
+          <div class="rw-col">
+            <div class="rw-title">Growth <span class="rw-max">/8.5</span></div>
+            ${growthRows}
+          </div>
+          <div class="rw-col">
+            <div class="rw-title">Inflation <span class="rw-max">/6.5</span></div>
+            ${inflationRows}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// =============================================================================
 // CACHE RENDERING
 // =============================================================================
 
@@ -213,6 +337,12 @@ function applyMacroCache(cache) {
   }
   if (subEl) {
     subEl.textContent = `${cache.regime.above} of ${cache.regime.total} assets above ${cache.ma_period}-day MA (${cache.regime.pct}%)`;
+  }
+
+  const regimeCardEl = document.getElementById('regime-card');
+  if (regimeCardEl) {
+    if (cache.regime_card) renderRegimeCard(cache.regime_card);
+    else regimeCardEl.innerHTML = '';
   }
 
   const grid = document.getElementById('categories-grid');
