@@ -163,6 +163,60 @@ def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> s
     return "\u2696\ufe0f No clear divergence"
 
 # =============================================================================
+# REGIME CARD
+# =============================================================================
+
+def compute_regime_card(signal_map: dict) -> dict:
+    """Compute 4-quadrant Growth x Inflation regime classification from above-MA signals."""
+
+    growth_max    = 8.5
+    inflation_max = 6.5
+
+    # Growth score: risk/growth assets above MA
+    growth_score = 0.0
+    if signal_map.get('HYG'):  growth_score += 2.0
+    if signal_map.get('IWM'):  growth_score += 1.5
+    if signal_map.get('SPY'):  growth_score += 1.0
+    if signal_map.get('EEM'):  growth_score += 1.0
+    if signal_map.get('EMB'):  growth_score += 1.0
+    # XLY>XLP: discretionary outperforming staples = growth signal
+    if signal_map.get('XLY') and not signal_map.get('XLP'):
+        growth_score += 1.0
+
+    # Inflation score
+    inflation_score = 0.0
+    if signal_map.get('TIP'):        inflation_score += 2.0
+    if not signal_map.get('TLT'):    inflation_score += 1.5  # TLT below MA = inflation
+    if signal_map.get('GLD'):        inflation_score += 1.0
+    if signal_map.get('USO'):        inflation_score += 1.0
+    if signal_map.get('DBC'):        inflation_score += 1.0
+
+    growth_pct    = round(growth_score    / growth_max    * 100)
+    inflation_pct = round(inflation_score / inflation_max * 100)
+
+    # 4-quadrant classification (50% threshold on each axis)
+    if   growth_pct >= 50 and inflation_pct <  50: quadrant = '\U0001f7e2 GOLDILOCKS'
+    elif growth_pct >= 50 and inflation_pct >= 50: quadrant = '\U0001f7e1 INFLATIONARY BOOM'
+    elif growth_pct <  50 and inflation_pct <  50: quadrant = '\U0001f535 RECESSION / DEFLATION'
+    else:                                           quadrant = '\U0001f534 STAGFLATION'
+
+    # Risk-off warning flags
+    flags = {
+        'carry_risk':       not signal_map.get('HYG', True),
+        'inflation_regime': inflation_pct >= 60,
+        'credit_stress':    not signal_map.get('HYG', True) and not signal_map.get('LQD', True),
+        'china_divergence': signal_map.get('FXI') != signal_map.get('SPY'),
+        'vol_spike':        bool(signal_map.get('UVXY') or signal_map.get('VIXY')),
+    }
+
+    return {
+        'quadrant':  quadrant,
+        'growth':    {'score': round(growth_score, 2), 'max': growth_max,    'pct': growth_pct},
+        'inflation': {'score': round(inflation_score, 2), 'max': inflation_max, 'pct': inflation_pct},
+        'flags':     flags,
+    }
+
+# =============================================================================
 # MACRO CACHE GENERATION
 # =============================================================================
 
@@ -172,6 +226,7 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
     cache_categories = []
     total_above  = 0  # regime count (with invert)
     total_count  = 0
+    signal_map   = {}  # symbol -> above_ma (for regime card)
 
     for cat in categories:
         invert = cat.get('invert', False)
@@ -205,6 +260,8 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
                              if prev_price != 0 else None)
             current_ma    = ma_pts[-1][1] if ma_pts else None
             above_ma      = (current_price > current_ma) if current_ma is not None else None
+
+            signal_map[asset['symbol']] = above_ma
 
             # Breadth bar (no invert)
             if above_ma is not None:
@@ -252,16 +309,17 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
     else:              regime_label = '\U0001f534 STRONG RISK OFF'
 
     return {
-        'generated':  generated,
-        'lookback':   lookback,
-        'ma_period':  ma_period,
+        'generated':   generated,
+        'lookback':    lookback,
+        'ma_period':   ma_period,
         'regime': {
             'label': regime_label,
             'above': total_above,
             'total': total_count,
             'pct':   round(pct * 100),
         },
-        'categories': cache_categories,
+        'regime_card': compute_regime_card(signal_map),
+        'categories':  cache_categories,
     }
 
 # =============================================================================
