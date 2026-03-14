@@ -128,55 +128,67 @@ def find_pivot_lows(points: list, left_bars: int, right_bars: int) -> list:
     return pivot_lows
 
 
-def detect_structure(points: list, bars_each_side: int) -> tuple:
+def classify_structure(points: list) -> tuple:
     """
-    Detect HH, LH, LL, HL from pivot highs and lows.
+    Pine Script-style market structure labeling (matches test.js logic).
 
-    Returns (hh, lh, ll, hl, trend_label, key_pivots) where:
-      - hh/lh/ll/hl are {idx, time, price} dicts or None
-      - trend_label is a human-readable string
-      - key_pivots is a list of 2 {time, price} dicts for the chart line (sorted by time)
+    Seeds lastHigh/lastLow from points[0] (window opening price).
+    Walks N=1 pivots chronologically; each pivot compared to running extreme:
+      - pivot high > running high  → HH (advance running high)
+      - pivot high <= running high → LH (running high unchanged)
+      - pivot low  < running low   → LL (advance running low)
+      - pivot low  >= running low  → HL (running low unchanged)
+
+    Returns (trend_label, last_high, last_low) where last_high/last_low are
+    {time, price, label} dicts (or None) representing the most recent labeled pivot.
     """
-    highs = find_pivot_highs(points, bars_each_side, bars_each_side)
-    lows  = find_pivot_lows(points,  bars_each_side, bars_each_side)
+    if not points:
+        return 'Sideways \u2194', None, None
 
-    hh = lh = ll = hl = None
+    highs = find_pivot_highs(points, 1, 1)
+    lows  = find_pivot_lows(points,  1, 1)
 
-    if highs:
-        hh = max(highs, key=lambda x: x['price'])
-        min_dist = 1.0 / hh['price']  # 1 point as % of HH price
-        lh_candidates = [h for h in highs if h['price'] < hh['price'] * (1 - min_dist) and h['idx'] > hh['idx']]
-        if lh_candidates:
-            lh = max(lh_candidates, key=lambda x: x['price'])
+    # Merge and walk in chronological order
+    pivots = sorted(
+        [{'type': 'high', **h} for h in highs] + [{'type': 'low', **l} for l in lows],
+        key=lambda x: x['idx']
+    )
 
-    if lows:
-        ll = min(lows, key=lambda x: x['price'])
-        hl_lows = [l for l in lows if l['idx'] > ll['idx'] and l['price'] > ll['price']]
-        if hl_lows:
-            hl = min(hl_lows, key=lambda x: x['price'])  # lowest pivot low above LL
-        elif highs:
-            hl_highs = [h for h in highs if h['idx'] > ll['idx']]
-            if hl_highs:
-                hl = min(hl_highs, key=lambda x: x['idx'])  # first pivot high after LL
+    if not pivots:
+        return 'Sideways \u2194', None, None
 
-    # Determine trend label and key pivots for chart line
-    if hh and hl:
-        label = 'HH + HL \u2197'
-        key_pivots = sorted([hh, hl], key=lambda x: x['time'])
-    elif hh:
-        label = 'HH (no HL yet) \u2197'
-        key_pivots = [hh]
-    elif ll and lh:
-        label = 'LL + LH \u2198'
-        key_pivots = sorted([ll, lh], key=lambda x: x['time'])
-    elif ll:
-        label = 'LL (no LH yet) \u2198'
-        key_pivots = [ll]
-    else:
-        label = 'Sideways \u2194'
-        key_pivots = []
+    # Seed from window opening price (first bar used as reference, not as pivot)
+    running_high = points[0][1]
+    running_low  = points[0][1]
+    last_high = None
+    last_low  = None
+    all_pivots = []
 
-    return hh, lh, ll, hl, label, key_pivots
+    for p in pivots:
+        if p['type'] == 'high':
+            label = 'HH' if p['price'] > running_high else 'LH'
+            if label == 'HH':
+                running_high = p['price']
+            last_high = {'time': p['time'], 'price': p['price'], 'label': label}
+        else:
+            label = 'LL' if p['price'] < running_low else 'HL'
+            if label == 'LL':
+                running_low = p['price']
+            last_low = {'time': p['time'], 'price': p['price'], 'label': label}
+        all_pivots.append({'time': p['time'], 'price': p['price'], 'label': label})
+
+    hl = last_high['label'] if last_high else None
+    ll = last_low['label']  if last_low  else None
+
+    if   hl == 'HH' and ll == 'HL': trend_label = 'HH + HL \u2197'
+    elif hl == 'LH' and ll == 'LL': trend_label = 'LL + LH \u2198'
+    elif hl == 'LH' and ll == 'HL': trend_label = 'LH + HL \u2194'
+    elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL \u2194'
+    elif hl == 'HH':                trend_label = 'HH only \u2197'
+    elif ll == 'LL':                trend_label = 'LL only \u2198'
+    else:                           trend_label = 'Sideways \u2194'
+
+    return trend_label, all_pivots, last_high, last_low
 
 
 def find_recent_pivot_highs(points: list, max_pivots: int, bars_each_side: int, mode: str) -> list:
@@ -226,26 +238,17 @@ def calculate_trend(pivots: list) -> str:
 
 
 def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> str:
-    up_full    = 'HH + HL \u2197'
-    up_partial = 'HH (no HL yet) \u2197'
-    dn_full    = 'LL + LH \u2198'
-    dn_partial = 'LL (no LH yet) \u2198'
-
-    up   = {up_full, up_partial}
-    down = {dn_full, dn_partial}
+    up   = {'HH + HL \u2197', 'HH only \u2197'}
+    down = {'LL + LH \u2198', 'LL only \u2198'}
 
     if trend1 in up   and trend2 in down:
         return f"\u26a0\ufe0f BEARISH: {name1} HH+HL, {name2} LL+LH"
     if trend1 in down and trend2 in up:
         return f"\u26a0\ufe0f BULLISH: {name2} HH+HL, {name1} LL+LH"
-    if trend1 == up_full and trend2 == up_full:
-        return "\u2705 ALIGNED: Both HH + HL"
-    if trend1 in up and trend2 in up:
-        return "\u2705 ALIGNED: Both higher structure"
-    if trend1 == dn_full and trend2 == dn_full:
-        return "\U0001f534 ALIGNED: Both LL + LH"
+    if trend1 in up   and trend2 in up:
+        return "\u2705 ALIGNED: Both HH+HL"
     if trend1 in down and trend2 in down:
-        return "\U0001f534 ALIGNED: Both lower structure"
+        return "\U0001f534 ALIGNED: Both LL+LH"
     return "\u2696\ufe0f Mixed / No clear divergence"
 
 # =============================================================================
@@ -564,10 +567,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             trend2 = calculate_trend(pivots2)
             signal = get_divergence_signal(trend1, trend2, pair['symbol1'], pair['symbol2'])
         else:
-            _, _, _, _, trend1, key1 = detect_structure(recent1, swing)
-            _, _, _, _, trend2, key2 = detect_structure(recent2, swing)
-            pivots1 = key1
-            pivots2 = key2
+            trend1, pivots1, _, _ = classify_structure(recent1)
+            trend2, pivots2, _, _ = classify_structure(recent2)
             signal = get_divergence_signal(trend1, trend2, pair['symbol1'], pair['symbol2'])
 
         cache_pairs.append({
@@ -575,8 +576,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             'trend1':  trend1,
             'trend2':  trend2,
             'signal':  signal,
-            'pivots1': [{'time': p['time'], 'price': round(p['price'], 4)} for p in pivots1],
-            'pivots2': [{'time': p['time'], 'price': round(p['price'], 4)} for p in pivots2],
+            'pivots1': [{'time': p['time'], 'price': round(p['price'], 4), 'label': p.get('label', '')} for p in pivots1],
+            'pivots2': [{'time': p['time'], 'price': round(p['price'], 4), 'label': p.get('label', '')} for p in pivots2],
         })
 
     return {

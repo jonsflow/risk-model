@@ -34,34 +34,6 @@ function findPivots(points) {
   return pivots;
 }
 
-function detectStructure(pivots) {
-  const highs = pivots.filter(p => p.type === 'high');
-  const lows  = pivots.filter(p => p.type === 'low');
-  let hh = null, ll = null, lh = null, hl = null;
-
-  if (highs.length > 0) {
-    hh = highs.reduce((a, b) => b.value > a.value ? b : a);
-    const minDist = 1 / hh.value;  // 1 point as % of HH price
-    const lhList = highs.filter(h => h.value < hh.value * (1 - minDist) && h.time > hh.time);
-    if (lhList.length > 0) lh = lhList.reduce((a, b) => b.value > a.value ? b : a);
-  }
-
-  if (lows.length > 0) {
-    ll = lows.reduce((a, b) => b.value < a.value ? b : a);
-    // HL: lowest pivot LOW after LL that is still above LL (deepest retest before reversal)
-    const hlLows = lows.filter(l => l.time > ll.time && l.value > ll.value);
-    if (hlLows.length > 0) {
-      hl = hlLows.reduce((a, b) => a.value < b.value ? a : b);
-    } else {
-      // fallback: first pivot HIGH after LL (e.g. 20d window ends right after LL)
-      const hlHighs = highs.filter(h => h.time > ll.time);
-      if (hlHighs.length > 0) hl = hlHighs.reduce((a, b) => a.time < b.time ? a : b);
-    }
-  }
-
-  return { hh, ll, lh, hl };
-}
-
 let allPoints = [];
 let chart = null;
 let lineSeries = null;
@@ -89,27 +61,25 @@ function render(lookback) {
   chart.timeScale().fitContent();
 
   const pivots = findPivots(pts);
-  const { hh, ll, lh, hl } = detectStructure(pivots);
 
-  if (hh) {
-    const hhDate = new Date(hh.time * 1000).toISOString().slice(0, 10);
-    const pivotTimes = new Map(pivots.map(p => [p.time, p]));
-    const fromHH = pts.filter(p => p.time >= hh.time);
-    console.log(`\n--- 20d points from HH (${hhDate} @ ${hh.value.toFixed(2)}) ---`);
-    for (const p of fromHH) {
-      const date = new Date(p.time * 1000).toISOString().slice(0, 10);
-      const piv = pivotTimes.get(p.time);
-      const pivLabel = piv ? piv.type : '';
-      const structLabel = p.time === hh?.time ? 'HH' : p.time === ll?.time ? 'LL' : p.time === lh?.time ? 'LH' : p.time === hl?.time ? 'HL' : '';
-      console.log(`${date}  ${p.value.toFixed(2)}  ${pivLabel}  ${structLabel}`);
+  // Seed from first bar so first pivot compares against the window's opening price
+  // (first/last bars are excluded from pivot detection but used as reference)
+  let lastHigh = { value: pts[0].value };
+  let lastLow  = { value: pts[0].value };
+  const markers = [];
+  const labelColors = { HH: '#14b8a6', LH: '#f97316', LL: '#ff4d4d', HL: '#4ade80' };
+
+  for (const p of pivots) {
+    if (p.type === 'high') {
+      const label = p.value > lastHigh.value ? 'HH' : 'LH';
+      if (label === 'HH') lastHigh = { ...p, label };  // only advance on new high
+      markers.push({ time: p.time, position: 'aboveBar', color: labelColors[label], shape: 'circle', text: label });
+    } else {
+      const label = p.value < lastLow.value ? 'LL' : 'HL';
+      if (label === 'LL') lastLow = { ...p, label };   // only advance on new low
+      markers.push({ time: p.time, position: 'belowBar', color: labelColors[label], shape: 'circle', text: label });
     }
   }
-
-  const markers = [];
-  if (hh) markers.push({ time: hh.time, position: 'aboveBar', color: '#ffd700', shape: 'circle', text: 'HH' });
-  if (lh) markers.push({ time: lh.time, position: 'aboveBar', color: '#4ade80', shape: 'circle', text: 'LH' });
-  if (ll) markers.push({ time: ll.time, position: 'belowBar', color: '#ff4d4d', shape: 'circle', text: 'LL' });
-  if (hl) markers.push({ time: hl.time, position: 'belowBar', color: '#fb923c', shape: 'circle', text: 'HL' });
 
   markers.sort((a, b) => a.time - b.time);
   markersPlugin = createSeriesMarkers(lineSeries, markers);
