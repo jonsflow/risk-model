@@ -1,9 +1,10 @@
 name: Generate analysis cache (data/cache/*.json)
 
 on:
-  schedule:
-    # Run shortly after data update (21:10 UTC) to pick up fresh CSVs
-    - cron: "10 21 * * 1-5"
+  workflow_run:
+    workflows: ["Update market data (Yahoo Finance → data/*.csv)"]
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
@@ -16,6 +17,8 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-latest
+    # Only run if triggered manually, or if the data update succeeded
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v4
 
