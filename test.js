@@ -41,14 +41,22 @@ function detectStructure(pivots) {
 
   if (highs.length > 0) {
     hh = highs.reduce((a, b) => b.value > a.value ? b : a);
-    const lhList = highs.filter(h => h.value < hh.value && h.time > hh.time);
+    const minDist = 1 / hh.value;  // 1 point as % of HH price
+    const lhList = highs.filter(h => h.value < hh.value * (1 - minDist) && h.time > hh.time);
     if (lhList.length > 0) lh = lhList.reduce((a, b) => b.value > a.value ? b : a);
   }
 
   if (lows.length > 0) {
     ll = lows.reduce((a, b) => b.value < a.value ? b : a);
-    const hlList = highs.filter(h => h.time > ll.time);
-    if (hlList.length > 0) hl = hlList.reduce((a, b) => a.time < b.time ? a : b);
+    // HL: lowest pivot LOW after LL that is still above LL (deepest retest before reversal)
+    const hlLows = lows.filter(l => l.time > ll.time && l.value > ll.value);
+    if (hlLows.length > 0) {
+      hl = hlLows.reduce((a, b) => a.value < b.value ? a : b);
+    } else {
+      // fallback: first pivot HIGH after LL (e.g. 20d window ends right after LL)
+      const hlHighs = highs.filter(h => h.time > ll.time);
+      if (hlHighs.length > 0) hl = hlHighs.reduce((a, b) => a.time < b.time ? a : b);
+    }
   }
 
   return { hh, ll, lh, hl };
@@ -72,10 +80,12 @@ function render(lookback) {
       handleScroll: false,
       handleScale: false,
     });
-    lineSeries = chart.addSeries(LineSeries, { color: '#4a9eff', lineWidth: 2 });
   }
 
+  if (lineSeries) chart.removeSeries(lineSeries);
+  lineSeries = chart.addSeries(LineSeries, { color: '#4a9eff', lineWidth: 2 });
   lineSeries.setData(pts);
+  markersPlugin = null;
   chart.timeScale().fitContent();
 
   const pivots = findPivots(pts);
@@ -99,10 +109,9 @@ function render(lookback) {
   if (hh) markers.push({ time: hh.time, position: 'aboveBar', color: '#ffd700', shape: 'circle', text: 'HH' });
   if (lh) markers.push({ time: lh.time, position: 'aboveBar', color: '#4ade80', shape: 'circle', text: 'LH' });
   if (ll) markers.push({ time: ll.time, position: 'belowBar', color: '#ff4d4d', shape: 'circle', text: 'LL' });
-  if (hl) markers.push({ time: hl.time, position: 'aboveBar', color: '#fb923c', shape: 'circle', text: 'HL' });
+  if (hl) markers.push({ time: hl.time, position: 'belowBar', color: '#fb923c', shape: 'circle', text: 'HL' });
 
   markers.sort((a, b) => a.time - b.time);
-  if (markersPlugin) markersPlugin.remove();
   markersPlugin = createSeriesMarkers(lineSeries, markers);
 }
 
