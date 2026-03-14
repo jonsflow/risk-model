@@ -326,6 +326,10 @@ function renderRegimeCard(rc) {
         <span class="regime-axis-pct">${rc.inflation.pct}%</span>
       </div>
     </div>
+    <div class="regime-method-note">
+      <strong>Growth</strong> — how many key risk assets (HYG, IWM, SPY, EEM, EMB, XLY vs XLP) are above their MA. High = broad expansion.<br><br>
+      <strong>Inflation</strong> — TIPS bid, long Treasuries weak, commodities (GLD, USO, DBC) above MA. High = inflation priced in.
+    </div>
   `;
 }
 
@@ -356,11 +360,7 @@ function renderRegimeChartCard(rc) {
     <svg viewBox="0 0 180 136" width="360" height="272" style="display:block;max-width:100%;margin-bottom:12px">
       ${buildRegimeMapSVG(rc)}
     </svg>
-    <div class="regime-method-note">
-      <strong>Growth</strong> — how many key risk assets (HYG, IWM, SPY, EEM, EMB, XLY vs XLP) are above their MA. High = broad expansion.<br><br>
-      <strong>Inflation</strong> — TIPS bid, long Treasuries weak, commodities (GLD, USO, DBC) above MA. High = inflation priced in.<br><br>
-      Each axis 0–100%. Crossing 50% sets the quadrant.
-    </div>
+    <div class="regime-method-note">Each axis 0–100%. Crossing 50% sets the quadrant.</div>
   `;
 }
 
