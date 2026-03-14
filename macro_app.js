@@ -5,6 +5,12 @@
 let LOOKBACK_DAYS = 20;
 let MA_PERIOD = 50;
 
+const STACKED_COLORS = [
+  '#4a9eff', '#f97316', '#a855f7', '#10b981',
+  '#f59e0b', '#ef4444', '#06b6d4', '#84cc16',
+  '#ec4899', '#14b8a6', '#f43f5e',
+];
+
 let MACRO_CATEGORIES = [];
 
 let activeTab = 'overview';
@@ -124,6 +130,62 @@ function renderSparkline(svgEl, pts, maPoints, color) {
     <path d="${pricePath}" fill="none" stroke="${color}" stroke-width="1.5"/>
     ${maPath ? `<path d="${maPath}" fill="none" stroke="#9ca3af" stroke-width="1" stroke-dasharray="3,2" opacity="0.8"/>` : ''}
   `;
+}
+
+function renderStackedSparkline(svgEl, assetsData) {
+  const W = svgEl.clientWidth || 300;
+  const H = 80;
+  const pad = { top: 6, right: 6, bottom: 6, left: 6 };
+  const cw = W - pad.left - pad.right;
+  const ch = H - pad.top - pad.bottom;
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.innerHTML = '';
+
+  const series = assetsData
+    .map((a, i) => ({
+      symbol: a.symbol,
+      color: STACKED_COLORS[i % STACKED_COLORS.length],
+      pts: last(a.price_points, LOOKBACK_DAYS),
+    }))
+    .filter(s => s.pts.length >= 2);
+
+  if (series.length === 0) return;
+
+  const normalized = series.map(s => ({
+    ...s,
+    pts: s.pts.map(([t, v]) => [t, (v / s.pts[0][1] - 1) * 100]),
+  }));
+
+  const allT = normalized.flatMap(s => s.pts.map(p => p[0]));
+  const allV = normalized.flatMap(s => s.pts.map(p => p[1]));
+  const minT = Math.min(...allT), maxT = Math.max(...allT);
+  const minV = Math.min(...allV), maxV = Math.max(...allV);
+  const tRange = maxT - minT || 1;
+  const vRange = maxV - minV || 1;
+
+  const sx = t => pad.left + (t - minT) / tRange * cw;
+  const sy = v => pad.top + (1 - (v - minV) / vRange) * ch;
+
+  const zeroY = sy(0);
+  const zl = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  zl.setAttribute('x1', pad.left); zl.setAttribute('x2', pad.left + cw);
+  zl.setAttribute('y1', zeroY);    zl.setAttribute('y2', zeroY);
+  zl.setAttribute('stroke', '#444'); zl.setAttribute('stroke-width', '0.5');
+  zl.setAttribute('stroke-dasharray', '3,2');
+  svgEl.appendChild(zl);
+
+  for (const s of normalized) {
+    const d = s.pts.map(([t, v], i) =>
+      `${i === 0 ? 'M' : 'L'}${sx(t).toFixed(1)},${sy(v).toFixed(1)}`
+    ).join(' ');
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', d);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', s.color);
+    path.setAttribute('stroke-width', '1.5');
+    path.setAttribute('stroke-linejoin', 'round');
+    svgEl.appendChild(path);
+  }
 }
 
 // =============================================================================
@@ -264,6 +326,10 @@ function renderRegimeCard(rc) {
         <span class="regime-axis-pct">${rc.inflation.pct}%</span>
       </div>
     </div>
+    <div class="regime-method-note">
+      <strong>Growth</strong> — how many key risk assets (HYG, IWM, SPY, EEM, EMB, XLY vs XLP) are above their MA. High = broad expansion.<br><br>
+      <strong>Inflation</strong> — TIPS bid, long Treasuries weak, commodities (GLD, USO, DBC) above MA. High = inflation priced in.
+    </div>
   `;
 }
 
@@ -294,11 +360,7 @@ function renderRegimeChartCard(rc) {
     <svg viewBox="0 0 180 136" width="360" height="272" style="display:block;max-width:100%;margin-bottom:12px">
       ${buildRegimeMapSVG(rc)}
     </svg>
-    <div class="regime-method-note">
-      <strong>Growth</strong> — how many key risk assets (HYG, IWM, SPY, EEM, EMB, XLY vs XLP) are above their MA. High = broad expansion.<br><br>
-      <strong>Inflation</strong> — TIPS bid, long Treasuries weak, commodities (GLD, USO, DBC) above MA. High = inflation priced in.<br><br>
-      Each axis 0–100%. Crossing 50% sets the quadrant.
-    </div>
+    <div class="regime-method-note">Each axis 0–100%. Crossing 50% sets the quadrant.</div>
   `;
 }
 
@@ -434,12 +496,19 @@ function renderOverviewTab(cache) {
     const theme = catData.theme || '';
     const desc = (THEME_DESCRIPTIONS[catData.id] || {})[theme] || '';
 
+    const symbolColors = Object.fromEntries(
+      catData.assets.map((a, i) => [a.symbol, STACKED_COLORS[i % STACKED_COLORS.length]])
+    );
+
+    const chipWithDot = (s, cls) =>
+      `<span class="sym-chip ${cls}"><span class="chip-dot" style="background:${symbolColors[s] || '#888'}"></span>${s}</span>`;
+
     const leadersHTML = catData.leaders && catData.leaders.length > 0
-      ? catData.leaders.map(s => `<span class="sym-chip above">${s}</span>`).join('')
+      ? catData.leaders.map(s => chipWithDot(s, 'above')).join('')
       : '<span class="sym-chip-none">—</span>';
 
     const laggardsHTML = catData.laggards && catData.laggards.length > 0
-      ? catData.laggards.map(s => `<span class="sym-chip below">${s}</span>`).join('')
+      ? catData.laggards.map(s => chipWithDot(s, 'below')).join('')
       : '<span class="sym-chip-none">—</span>';
 
     const card = document.createElement('div');
@@ -455,6 +524,7 @@ function renderOverviewTab(cache) {
         <div class="split-bar-seg" style="width:${pct}%;background:${aboveColor}"></div>
         <div class="split-bar-seg" style="width:${100 - pct}%;background:${belowColor}"></div>
       </div>
+      <svg class="stacked-sparkline" id="stacked-ov-${catData.id}" height="80"></svg>
       <div class="overview-theme-label">${theme}</div>
       ${desc ? `<div class="overview-theme-desc">${desc}</div>` : ''}
       <div class="overview-chips-section">
@@ -468,12 +538,18 @@ function renderOverviewTab(cache) {
         </div>
       </div>
       <div class="overview-cat-footer">
-        <span class="overview-details-link">${above} / ${total} above ${cache.ma_period}-day MA &nbsp;·&nbsp; Sparklines ›</span>
+        <span class="overview-details-link">${above} / ${total} above ${cache.ma_period}-day MA &nbsp;·&nbsp; Detail ›</span>
       </div>
     `;
 
-    card.querySelector('.overview-details-link').addEventListener('click', () => switchTab(catData.id));
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', () => switchTab(catData.id));
     grid.appendChild(card);
+
+    requestAnimationFrame(() => {
+      const svgEl = document.getElementById(`stacked-ov-${catData.id}`);
+      if (svgEl) renderStackedSparkline(svgEl, catData.assets);
+    });
   }
 
   panel.appendChild(grid);
