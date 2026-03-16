@@ -1,9 +1,52 @@
 {
-  "series": [
+  "categories": [
     {
-      "id": "BAMLH0A0HYM2",
-      "name": "HY OAS Spread",
-      "description": "ICE BofA US High Yield Index Option-Adjusted Spread over Treasuries (Percent)"
+      "id": "financial-conditions",
+      "name": "Financial Conditions",
+      "color": "#4a9eff",
+      "series": [
+        { "id": "T10Y2Y",       "name": "Yield Curve (10Y−2Y)",   "units": "%",    "display": "level",   "freq": "daily"   },
+        { "id": "DGS10",        "name": "10Y Treasury Yield",      "units": "%",    "display": "level",   "freq": "daily"   },
+        { "id": "T10YIE",       "name": "10Y Breakeven Inflation", "units": "%",    "display": "level",   "freq": "daily"   },
+        { "id": "T5YIE",        "name": "5Y Breakeven Inflation",  "units": "%",    "display": "level",   "freq": "daily"   },
+        { "id": "VIXCLS",       "name": "VIX",                     "units": "idx",  "display": "level",   "freq": "daily"   },
+        { "id": "BAMLH0A0HYM2", "name": "HY OAS Spread",          "units": "%",    "display": "level",   "freq": "daily"   }
+      ]
+    },
+    {
+      "id": "labor",
+      "name": "Labor Market",
+      "color": "#10b981",
+      "series": [
+        { "id": "ICSA",   "name": "Initial Jobless Claims", "units": "K",  "display": "level", "freq": "weekly"  },
+        { "id": "CCSA",   "name": "Continued Claims",       "units": "K",  "display": "level", "freq": "weekly"  },
+        { "id": "PAYEMS", "name": "Nonfarm Payrolls",       "units": "K",  "display": "level", "freq": "monthly" },
+        { "id": "UNRATE", "name": "Unemployment Rate",      "units": "%",  "display": "level", "freq": "monthly" },
+        { "id": "JTSJOL", "name": "Job Openings (JOLTS)",   "units": "K",  "display": "level", "freq": "monthly" }
+      ]
+    },
+    {
+      "id": "inflation",
+      "name": "Inflation",
+      "color": "#f59e0b",
+      "series": [
+        { "id": "PCEPILFE", "name": "Core PCE",            "units": "YoY%", "display": "pct_yoy", "freq": "monthly" },
+        { "id": "CPILFESL", "name": "Core CPI",            "units": "YoY%", "display": "pct_yoy", "freq": "monthly" },
+        { "id": "CPIAUCSL", "name": "Headline CPI",        "units": "YoY%", "display": "pct_yoy", "freq": "monthly" },
+        { "id": "PPIACO",   "name": "PPI All Commodities", "units": "YoY%", "display": "pct_yoy", "freq": "monthly" }
+      ]
+    },
+    {
+      "id": "growth",
+      "name": "Growth & Activity",
+      "color": "#a78bfa",
+      "series": [
+        { "id": "INDPRO",   "name": "Industrial Production", "units": "idx", "display": "level",   "freq": "monthly" },
+        { "id": "UMCSENT",  "name": "Consumer Sentiment",    "units": "idx", "display": "level",   "freq": "monthly" },
+        { "id": "RSAFS",    "name": "Retail Sales",          "units": "$M",  "display": "pct_mom", "freq": "monthly" },
+        { "id": "FEDFUNDS", "name": "Fed Funds Rate",        "units": "%",   "display": "level",   "freq": "monthly" },
+        { "id": "NFCI",     "name": "Chicago Fed Conditions","units": "idx", "display": "level",   "freq": "weekly"  }
+      ]
     }
   ]
 }

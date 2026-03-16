@@ -19,7 +19,10 @@ For GitHub Actions, store it as a repository secret named FRED_API_KEY.
 import os
 import json
 import pathlib
+from dotenv import load_dotenv
 from fredapi import Fred
+
+load_dotenv()
 
 
 CONFIG_PATH = pathlib.Path("fred_config.json")
@@ -48,6 +51,19 @@ def save_csv(series, series_id):
     print(f"  Saved {len(series)} rows → {path}")
 
 
+def get_all_series(config):
+    """Flatten categories structure into a list of series dicts."""
+    if 'categories' in config:
+        seen, series = set(), []
+        for cat in config['categories']:
+            for s in cat['series']:
+                if s['id'] not in seen:
+                    seen.add(s['id'])
+                    series.append(s)
+        return series
+    return config.get('series', [])
+
+
 def main():
     api_key = os.environ.get("FRED_API_KEY")
     if not api_key:
@@ -56,7 +72,7 @@ def main():
     fred   = Fred(api_key=api_key)
     config = load_config()
 
-    for entry in config["series"]:
+    for entry in get_all_series(config):
         series_id = entry["id"]
         name      = entry["name"]
         print(f"Fetching {series_id} ({name})...")

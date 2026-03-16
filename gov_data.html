@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Government Data Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="Key FRED economic indicators organized by category — financial conditions, labor market, inflation, and growth." />
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="index.html" class="nav-link">Divergence</a>
+    <a href="macro.html" class="nav-link">Macro Model</a>
+    <a href="credit.html" class="nav-link">Credit Spread</a>
+    <a href="gov_data.html" class="nav-link active">Gov Data</a>
+  </nav>
+
+  <!-- Header + Controls -->
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">Government Data</h1>
+        <div class="muted" id="meta">Loading data…</div>
+      </div>
+      <div class="controls-row">
+        <div class="pill">
+          <div class="muted">Chart History</div>
+          <select id="historySelect" class="control-select">
+            <option value="252" selected>1 year</option>
+            <option value="504">2 years</option>
+            <option value="1260">5 years</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Category sections — populated by gov_data_app.js -->
+  <div id="gov-categories"></div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Data provided by <a href="https://fred.stlouisfed.org" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">FRED (Federal Reserve Bank of St. Louis)</a>
+      · Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Pages</a>
+      · Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+    </div>
+  </div>
+
+<script src="gov_data_app.js"></script>
+</body>
+</html>
