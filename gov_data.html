@@ -22,21 +22,11 @@
         <h1 style="margin:0 0 4px 0">Government Data</h1>
         <div class="muted" id="meta">Loading data…</div>
       </div>
-      <div class="controls-row">
-        <div class="pill">
-          <div class="muted">Chart History</div>
-          <select id="historySelect" class="control-select">
-            <option value="252" selected>1 year</option>
-            <option value="504">2 years</option>
-            <option value="1260">5 years</option>
-          </select>
-        </div>
-      </div>
     </div>
   </div>
 
-  <!-- Category sections — populated by gov_data_app.js -->
-  <div id="gov-categories"></div>
+  <!-- Tab container — populated by gov_data_app.js -->
+  <div id="tab-container"></div>
 
   <div class="card" style="margin-top:18px">
     <div class="muted" style="text-align:center;font-size:12px">
@@ -49,6 +39,7 @@
     </div>
   </div>
 
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
 <script src="gov_data_app.js"></script>
 </body>
 </html>
