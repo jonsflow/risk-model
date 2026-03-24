@@ -129,6 +129,29 @@
   }
 
   // ---------------------------------------------------------------------------
+  // addChartLegend
+  // Pins a flex row of [ColorLabel][Value] badges to the top-left of a chart
+  // container. entries: [{ label, color, value }]
+  // ---------------------------------------------------------------------------
+  function addChartLegend(containerId, entries) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    el.style.position = 'relative';
+    const row = document.createElement('div');
+    row.style.cssText = 'position:absolute;top:8px;left:8px;z-index:10;pointer-events:none;display:flex;gap:6px;flex-wrap:wrap;';
+    for (const { label, color, value } of entries) {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
+      item.innerHTML = `
+        <span style="background:${color};color:#000;font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;">${label}</span>
+        <span style="background:rgba(23,24,27,0.85);border:1px solid #2a2a3e;color:${color};font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px;">${value}</span>
+      `;
+      row.appendChild(item);
+    }
+    el.appendChild(row);
+  }
+
+  // ---------------------------------------------------------------------------
   // hexToRgba — '#rrggbb', 0–1 → 'rgba(r,g,b,a)'
   // ---------------------------------------------------------------------------
   function hexToRgba(hex, alpha) {
@@ -167,6 +190,6 @@
     signalStrongOff: '#ef4444',
   };
 
-  global.ChartUtils = { createDashboardChart, createFomcChart, fitWithRightPadding, fitWithDateRangePadding, hexToRgba, colors };
+  global.ChartUtils = { createDashboardChart, createFomcChart, fitWithRightPadding, fitWithDateRangePadding, addChartLegend, hexToRgba, colors };
 
 }(window));

@@ -154,24 +154,7 @@ function createBaseChart(containerId, height, overrides) {
   return chart;
 }
 
-function addChartLegend(containerId, entries) {
-  // entries: [{ label, color, value }]
-  // Creates a flex row of [Label][Value] badges pinned to top-left of chart.
-  const el = document.getElementById(containerId);
-  el.style.position = 'relative';
-  const row = document.createElement('div');
-  row.style.cssText = 'position:absolute;top:8px;left:8px;z-index:10;pointer-events:none;display:flex;gap:6px;flex-wrap:wrap;';
-  for (const { label, color, value } of entries) {
-    const item = document.createElement('div');
-    item.style.cssText = 'display:inline-flex;align-items:center;gap:4px;';
-    item.innerHTML = `
-      <span style="background:${color};color:#000;font-size:11px;font-weight:700;padding:2px 7px;border-radius:3px;">${label}</span>
-      <span style="background:rgba(23,24,27,0.85);border:1px solid #2a2a3e;color:${color};font-size:11px;font-weight:600;padding:2px 7px;border-radius:3px;">${value}</span>
-    `;
-    row.appendChild(item);
-  }
-  el.appendChild(row);
-}
+const addChartLegend = ChartUtils.addChartLegend;
 
 function toChartPoints(points) {
   return points.map(p => ({ time: p.date, value: p.value }));
