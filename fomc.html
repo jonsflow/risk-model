@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>FOMC Policy Dashboard</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="FOMC monetary policy dashboard — rate history, decision timeline, SEP dot plot, balance sheet composition, and liquidity indicators." />
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="index.html" class="nav-link">Divergence</a>
+    <a href="macro.html" class="nav-link">Macro Model</a>
+    <a href="credit.html" class="nav-link">Credit Spread</a>
+    <a href="gov_data.html" class="nav-link">Gov Data</a>
+    <a href="fomc.html" class="nav-link active">FOMC</a>
+  </nav>
+
+  <!-- Header -->
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">FOMC Policy Dashboard</h1>
+        <div class="muted" id="meta">Loading data…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Summary stat cards -->
+  <div class="risk-cards-container">
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Current Target Rate</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="card-rate">—</div>
+      <div class="muted" style="font-size:12px">Fed Funds Target Band</div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Last Move</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="card-last-move">—</div>
+      <div class="muted" style="font-size:12px" id="card-last-move-date">—</div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">SEP Median</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="card-sep">—</div>
+      <div class="muted" style="font-size:12px">Latest dot-plot median</div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Fed Balance Sheet</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="card-bs">—</div>
+      <div class="muted" style="font-size:12px">Total Assets (WALCL)</div>
+    </div>
+  </div>
+
+  <!-- Chart 1: Rate History — full history with FEDFUNDS + EFFR splice, decision markers -->
+  <div class="card" style="margin-top:18px">
+    <div class="chart-title">Fed Funds Rate History</div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">
+      Pre-2016: FEDFUNDS (monthly) · 2016+: EFFR (daily) · Arrows mark FOMC decisions
+    </div>
+    <div id="chart-rate-history" style="width:100%;height:300px"></div>
+  </div>
+
+  <!-- Chart 2: Rate Corridor — last 2 years zoomed in -->
+  <div class="card" style="margin-top:18px">
+    <div class="chart-title">Rate Corridor — Last 2 Years</div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">
+      Orange dashed = target band · White = EFFR · Blue = SOFR · Teal dotted = IORB
+    </div>
+    <div id="chart-rate-corridor" style="width:100%;height:240px"></div>
+  </div>
+
+  <!-- Decision Timeline -->
+  <div class="card" style="margin-top:18px">
+    <h2 style="font-size:16px;margin:0 0 12px 0;color:#f97316">FOMC Decision Timeline</h2>
+    <div style="overflow-y:auto;max-height:320px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="border-bottom:1px solid #2a2a3e;color:#a7a7ad;font-size:11px;text-transform:uppercase;letter-spacing:0.05em">
+            <th style="text-align:left;padding:6px 8px">Date</th>
+            <th style="text-align:left;padding:6px 8px">Decision</th>
+            <th style="text-align:right;padding:6px 8px">Magnitude</th>
+            <th style="text-align:right;padding:6px 8px">Rate After</th>
+          </tr>
+        </thead>
+        <tbody id="decision-tbody">
+          <tr><td colspan="4" class="muted" style="padding:12px 8px;text-align:center">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Two-column: SEP dot plot + Overnight Reverse Repo -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px">
+    <div class="card">
+      <div class="chart-title">SEP Median Rate Projection (Dot Plot)</div>
+      <div class="muted" style="font-size:11px;margin-bottom:8px">
+        FEDTARMD — quarterly FOMC median projection. Shows how the Fed's projected path has shifted.
+      </div>
+      <div id="chart-sep" style="width:100%;height:220px"></div>
+    </div>
+    <div class="card">
+      <div class="chart-title">Overnight Reverse Repo (O/N RRP)</div>
+      <div class="muted" style="font-size:11px;margin-bottom:8px">
+        RRPONTSYD ($B) — excess cash parked at the Fed. Drain = liquidity moving back into markets.
+      </div>
+      <div id="chart-rrpo" style="width:100%;height:220px"></div>
+    </div>
+  </div>
+
+  <!-- Chart 5: Balance Sheet Composition — full width -->
+  <div class="card" style="margin-top:18px">
+    <div class="chart-title">Fed Balance Sheet Composition ($B)</div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">
+      Purple area = Total Assets (WALCL) · Blue = Treasuries (TREAST) · Amber = MBS (MBST)
+    </div>
+    <div id="chart-balance-sheet" style="width:100%;height:280px"></div>
+  </div>
+
+  <!-- Reserve Balances — full width -->
+  <div class="card" style="margin-top:18px">
+    <div class="chart-title">Reserve Balances at Federal Reserve Banks ($B)</div>
+    <div class="muted" style="font-size:11px;margin-bottom:8px">
+      WRESBAL — banks' excess reserves held at the Fed. QE expands this; QT and RRP drain it.
+    </div>
+    <div id="chart-wresbal" style="width:100%;height:220px"></div>
+  </div>
+
+  <!-- Note -->
+  <div class="card" style="margin-top:18px">
+    <div class="muted" style="font-size:13px">
+      Rate cut probabilities are not available on FRED.
+      For market-implied probabilities, see <a href="https://www.cmegroup.com/markets/interest-rates/cme-fedwatch-tool.html" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">CME FedWatch →</a>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Data provided by <a href="https://fred.stlouisfed.org" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">FRED (Federal Reserve Bank of St. Louis)</a>
+      · Charts powered by <a href="https://www.tradingview.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">TradingView</a> Lightweight Charts
+      · Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Pages</a>
+      · Data fetched via <a href="https://github.com/features/actions" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Actions</a>
+      · Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script src="fomc_app.js"></script>
+</body>
+</html>

@@ -478,13 +478,6 @@ function scoreFinancialConditions(vixPts, nfciPts) {
 // LIGHTWEIGHT CHARTS HELPER
 // =============================================================================
 
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 const govCharts = {};
 
 function destroyGovChart(id) {
@@ -504,21 +497,18 @@ function renderGovChart(containerId, points, opts = {}) {
   const height = opts.height || 250;
   const color  = opts.color  || '#4a9eff';
 
-  const { createChart, LineSeries, AreaSeries, BaselineSeries } = window.LightweightCharts;
+  const { LineSeries, AreaSeries, BaselineSeries } = window.LightweightCharts;
 
-  const chart = createChart(container, {
-    layout: { background: { type: 'solid', color: '#17181b' }, textColor: '#e9e9ea' },
+  const chart = ChartUtils.createDashboardChart(container, height, {
     grid: { vertLines: { color: '#2a2b2f' }, horzLines: { color: '#2a2b2f' } },
-    handleScroll: false,
-    handleScale: false,
-    width: container.clientWidth,
-    height,
   });
 
   govCharts[containerId] = chart;
 
   const data = points.map(p => ({ time: p.date, value: p.value }));
   let series;
+
+  const LC = window.LightweightCharts;
 
   if (opts.baseline !== undefined && typeof BaselineSeries !== 'undefined') {
     series = chart.addSeries(BaselineSeries, {
@@ -531,16 +521,17 @@ function renderGovChart(containerId, points, opts = {}) {
       bottomFillColor2: 'rgba(16,185,129,0.3)',
       lineWidth: 2,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
   } else {
     series = chart.addSeries(AreaSeries, {
       lineColor:   color,
-      topColor:    hexToRgba(color, 0.3),
-      bottomColor: hexToRgba(color, 0),
+      topColor:    ChartUtils.hexToRgba(color, 0.3),
+      bottomColor: ChartUtils.hexToRgba(color, 0),
       lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
+      priceLineVisible: true,
+      priceLineStyle:   LC.LineStyle.Dashed,
+      lastValueVisible: true,
     });
   }
 
@@ -559,7 +550,12 @@ function renderGovChart(containerId, points, opts = {}) {
     }
   }
 
-  chart.timeScale().fitContent();
+  ChartUtils.fitWithRightPadding(chart, data.length);
+
+  if (opts.legend) {
+    ChartUtils.addChartLegend(containerId, opts.legend);
+  }
+
   return chart;
 }
 
@@ -920,6 +916,9 @@ Spread    Probability   Signal
         { value: 30, color: '#f59e0b', label: 'Watch (30%)' },
         { value: 50, color: '#ef4444', label: 'Elevated (50%)' },
       ],
+      legend: currentProb !== null
+        ? [{ label: 'Rec. Prob.', color: probColor(currentProb), value: `${currentProb.toFixed(1)}%` }]
+        : [],
     });
   });
 }
@@ -1066,6 +1065,9 @@ Note: not an official Federal Reserve model — simplified approximation only.</
     renderGovChart('chart-nfci', nfciPts, {
       height:   250,
       baseline: 0,
+      legend: currentNFCI
+        ? [{ label: 'NFCI', color: nfciColor, value: currentNFCI.value.toFixed(3) }]
+        : [],
     });
   });
 }
@@ -1233,6 +1235,9 @@ PAYEMS (Nonfarm Payrolls, monthly)
       refLines: [
         { value: 0.50, color: '#ef4444', label: 'Trigger (0.50)' },
       ],
+      legend: currentSahm
+        ? [{ label: 'Sahm', color: sahmColor, value: currentSahm.value.toFixed(2) }]
+        : [],
     });
 
     // Supporting sparkline mini-cards

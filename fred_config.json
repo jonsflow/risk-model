@@ -47,6 +47,25 @@
         { "id": "FEDFUNDS", "name": "Fed Funds Rate",        "units": "%",   "display": "level",   "freq": "monthly" },
         { "id": "NFCI",     "name": "Chicago Fed Conditions","units": "idx", "display": "level",   "freq": "weekly"  }
       ]
+    },
+    {
+      "id": "fomc",
+      "name": "FOMC & Policy Rates",
+      "color": "#f97316",
+      "series": [
+        { "id": "DFEDTARU",     "name": "Fed Funds Target — Upper",     "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "DFEDTARL",     "name": "Fed Funds Target — Lower",     "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "EFFR",         "name": "Effective Fed Funds Rate",      "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "IORB",         "name": "Interest on Reserve Balances", "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "SOFR",         "name": "SOFR (Overnight)",              "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "SOFR30DAYAVG", "name": "30-Day Avg SOFR",              "units": "%",  "display": "level", "freq": "daily"   },
+        { "id": "WALCL",        "name": "Fed Balance Sheet",             "units": "$B", "display": "level", "freq": "weekly"  },
+        { "id": "FEDTARMD",     "name": "SEP Median Rate Projection",    "units": "%",  "display": "level", "freq": "monthly" },
+        { "id": "RRPONTSYD",    "name": "Overnight Reverse Repo",        "units": "$B", "display": "level", "freq": "daily"   },
+        { "id": "WRESBAL",      "name": "Reserve Balances",              "units": "$B", "display": "level", "freq": "weekly"  },
+        { "id": "TREAST",       "name": "Treasuries Held by Fed",        "units": "$M", "display": "level", "freq": "weekly"  },
+        { "id": "MBST",         "name": "MBS Held by Fed",               "units": "$M", "display": "level", "freq": "weekly"  }
+      ]
     }
   ]
 }

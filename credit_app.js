@@ -9,7 +9,7 @@ let HISTORY_DAYS   = 504;  // chart display window
 const SERIES_ID    = 'BAMLH0A0HYM2';
 const CSV_PATH     = `./data/fred/${SERIES_ID}.csv`;
 
-const { createChart, LineSeries, AreaSeries } = window.LightweightCharts;
+const { LineSeries, AreaSeries } = window.LightweightCharts;
 
 // =============================================================================
 // DATA LOADING
@@ -66,23 +66,16 @@ function momentumScore(currentValue, maValue) {
 }
 
 function signalLabel(score) {
-  if (score >=  3) return { label: '🟢 STRONG RISK ON',  color: '#10b981' };
-  if (score >=  1) return { label: '🟡 RISK ON',         color: '#84cc16' };
-  if (score === 0) return { label: '⚪ NEUTRAL',          color: '#a7a7ad' };
-  if (score >= -2) return { label: '🟠 RISK OFF',         color: '#f59e0b' };
-  return               { label: '🔴 STRONG RISK OFF',    color: '#ef4444' };
+  if (score >=  3) return { label: '🟢 STRONG RISK ON',  color: ChartUtils.colors.signalStrongOn };
+  if (score >=  1) return { label: '🟡 RISK ON',         color: ChartUtils.colors.signalOn };
+  if (score === 0) return { label: '⚪ NEUTRAL',          color: ChartUtils.colors.signalNeutral };
+  if (score >= -2) return { label: '🟠 RISK OFF',         color: ChartUtils.colors.signalOff };
+  return               { label: '🔴 STRONG RISK OFF',    color: ChartUtils.colors.signalStrongOff };
 }
 
 // =============================================================================
 // CHART
 // =============================================================================
-
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
 
 let chartInstance = null;
 
@@ -95,29 +88,17 @@ function renderChart(points, maPoints, historyDays) {
   const startDate = recent[0].date;
   const recentMa = maPoints.filter(p => p.date >= startDate);
 
-  const chart = createChart(container, {
-    layout: {
-      background: { type: 'solid', color: '#17181b' },
-      textColor: '#e9e9ea',
-    },
-    grid: {
-      vertLines: { color: '#333' },
-      horzLines: { color: '#333' },
-    },
-    handleScroll: false,
-    handleScale: false,
-    width: container.clientWidth,
-    height: 300,
-  });
+  const chart = ChartUtils.createDashboardChart(container, 300);
+  const LC = window.LightweightCharts;
 
-  const color = '#f59e0b';
   const area = chart.addSeries(AreaSeries, {
-    lineColor: color,
-    topColor: hexToRgba(color, 0.3),
-    bottomColor: hexToRgba(color, 0),
+    lineColor: ChartUtils.colors.credit,
+    topColor: ChartUtils.hexToRgba(ChartUtils.colors.credit, 0.3),
+    bottomColor: ChartUtils.hexToRgba(ChartUtils.colors.credit, 0),
     lineWidth: 2,
-    priceLineVisible: false,
-    lastValueVisible: false,
+    priceLineVisible: true,
+    priceLineStyle: LC.LineStyle.Dashed,
+    lastValueVisible: true,
   });
   area.setData(recent.map(p => ({ time: p.date, value: p.value })));
 
@@ -127,12 +108,21 @@ function renderChart(points, maPoints, historyDays) {
       lineWidth: 1,
       lineStyle: 4,
       priceLineVisible: false,
-      lastValueVisible: false,
+      lastValueVisible: true,
     });
     ma.setData(recentMa.map(p => ({ time: p.date, value: p.value })));
   }
 
-  chart.timeScale().fitContent();
+  ChartUtils.fitWithRightPadding(chart, recent.length);
+
+  const lastSpread = recent[recent.length - 1].value;
+  const entries = [{ label: 'HY OAS', color: ChartUtils.colors.credit, value: `${lastSpread.toFixed(2)}%` }];
+  if (recentMa.length) {
+    const lastMa = recentMa[recentMa.length - 1].value;
+    entries.push({ label: `${MA_PERIOD}d MA`, color: '#ffffff', value: `${lastMa.toFixed(2)}%` });
+  }
+  ChartUtils.addChartLegend('chart-credit', entries);
+
   chartInstance = chart;
 }
 

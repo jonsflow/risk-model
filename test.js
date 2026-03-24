@@ -55,9 +55,21 @@ function render(lookback) {
   }
 
   if (lineSeries) chart.removeSeries(lineSeries);
-  lineSeries = chart.addSeries(LineSeries, { color: '#4a9eff', lineWidth: 2 });
+  lineSeries = chart.addSeries(LineSeries, {
+    color: '#4a9eff',
+    lineWidth: 2,
+    lastValueVisible: true,
+    priceLineVisible: true,
+    title: 'Current Price',
+  });
   lineSeries.setData(pts);
   markersPlugin = null;
+
+  // rightOffset in bars proportional to data length so the right strip is
+  // always ~7% of chart width regardless of how many bars are shown.
+  // Formula: strip% = rightOffset / (pts.length + rightOffset)
+  // Solving for rightOffset = pts.length * 0.07 / 0.93 ≈ pts.length * 0.075
+  chart.timeScale().applyOptions({ rightOffset: Math.ceil(pts.length * 0.075) });
   chart.timeScale().fitContent();
 
   const pivots = findPivots(pts);
