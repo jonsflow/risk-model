@@ -5,6 +5,7 @@
  */
 
 let cacheData = null;
+let scoredTrades = null;
 
 // =============================================================================
 // MAIN ENTRY POINT
@@ -20,10 +21,10 @@ async function main() {
     // Render all steps
     renderHeader();
     renderDayQuality();
-    renderEodOutcomes();
 
-    // If day grade is C or F, stop here (Morning Setup tab only)
+    // If day grade is C or F, render EOD with what we have and stop morning flow
     if (['C', 'F'].includes(cacheData.day_quality.grade)) {
+      renderEodOutcomes(null);
       document.getElementById('step-2').style.display = 'none';
       document.getElementById('step-3').style.display = 'none';
       document.getElementById('step-4').style.display = 'none';
@@ -32,12 +33,14 @@ async function main() {
       return;
     }
 
-    // Continue with remaining steps
+    // Continue with remaining morning steps, then render EOD with scored data
     renderRegime();
     renderPatternScanner();
     const scored = scoreConfluences();
+    scoredTrades = scored;
     renderRecommendations(scored);
     renderPositionCalc(scored);
+    renderEodOutcomes(scored);
 
   } catch (error) {
     console.error('Error:', error);
@@ -637,93 +640,187 @@ function switchTradeTab(tab) {
 // END OF DAY TAB
 // =============================================================================
 
-function renderEodOutcomes() {
+function renderEodOutcomes(scored) {
   const el = document.getElementById('eodContent');
   if (!el) return;
 
-  // cache_type is set by Python at generation time: 'morning' or 'eod'
-  let warningHTML = '';
+  const sec = (title, body) => `
+    <div style="margin-bottom: 24px;">
+      <h3 style="margin: 0 0 12px 0; color: #94a3b8; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #2a2a3e; padding-bottom: 6px;">${title}</h3>
+      ${body}
+    </div>`;
+
+  const pill = (label, value, color, note) => `
+    <div class="pill" style="min-width: 0;">
+      <div class="muted" style="font-size:0.8em;">${label}</div>
+      <span style="font-weight: bold; color: ${color};">${value}</span>
+      ${note ? `<div class="muted" style="font-size:0.75em; margin-top:4px;">${note}</div>` : ''}
+    </div>`;
+
+  const outcomeBadge = (ok, hitLabel, missLabel) =>
+    ok ? `<span style="color:#10b981; font-weight:bold;">${hitLabel}</span>`
+       : `<span style="color:#6b7280;">${missLabel}</span>`;
+
+  let html = '';
+
+  // Morning cache warning
   if (cacheData.cache_type === 'morning') {
     const genStr = new Date(cacheData.generated).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
-    warningHTML = `
-      <div style="background: #1a1400; border: 1px solid #7c6a00; border-radius: 6px; padding: 10px 14px; margin-bottom: 16px; color: #f59e0b; font-size: 0.9em;">
-        Cache generated at ${genStr} — market may still be open. Outcomes will update after the 4 PM ET close.
-      </div>`;
+    html += `<div style="background:#1a1400; border:1px solid #7c6a00; border-radius:6px; padding:10px 14px; margin-bottom:20px; color:#f59e0b; font-size:0.9em;">
+      Cache generated at ${genStr} — market may still be open. Full outcomes update after the 4 PM ET close.
+    </div>`;
   }
 
-  const symbols = cacheData.symbols;
-  const activeSymbols = Object.keys(symbols).filter(sym => {
-    const d = symbols[sym];
-    const hasPattern = cacheData.active_patterns.some(p => p.symbol === sym);
-    const hasGap = d.gap_type !== 'none';
-    return hasPattern || hasGap;
-  });
+  // ── SECTION 1: DAY QUALITY ──────────────────────────────────────────────
+  const grade = cacheData.day_quality.grade;
+  const mods  = cacheData.day_quality.modifiers;
+  const gradeColor = grade === 'A+' || grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = (grade === 'A+' || grade === 'A') ? 'Tradeable day' : grade === 'B' ? 'Reduced size' : 'No trades';
 
-  if (activeSymbols.length === 0) {
-    el.innerHTML = warningHTML + '<div class="muted">No setups detected today.</div>';
-    return;
+  let dqBody = `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+    ${pill('Day Grade', grade, gradeColor, gradeLabel)}
+    ${pill('ATR vs Avg', mods.atr_above_avg ? 'Above ✓' : 'Below ✗', mods.atr_above_avg ? '#10b981' : '#ef4444', null)}
+    ${pill('Vol > 20d', mods.volume_above_20d ? 'Yes ✓' : 'No ✗', mods.volume_above_20d ? '#10b981' : '#6b7280', null)}
+    ${pill('Vol > 50d', mods.volume_above_50d ? 'Yes ✓' : 'No ✗', mods.volume_above_50d ? '#10b981' : '#6b7280', null)}
+  </div>`;
+  if (['C', 'F'].includes(grade)) {
+    dqBody += `<div style="margin-top:10px; color:#ef4444; font-size:0.9em;">No trades taken — day did not meet quality gate.</div>`;
   }
+  html += sec('1 — Day Quality', dqBody);
 
-  const gradeColor = g => g === 'A+' || g === 'A' ? '#10b981' : g === 'B' ? '#f59e0b' : '#ef4444';
+  // ── SECTION 2: MARKET REGIME ────────────────────────────────────────────
+  const regime = cacheData.regime;
+  const regimeColors = { 'Trending': '#3b82f6', 'Ranging': '#f59e0b', 'Choppy': '#ef4444' };
+  const patternMenus = {
+    'Trending': 'ORB, Gap Continuation, Engulfing (with trend)',
+    'Ranging':  'Gap Fill, Outside Day, Engulfing at S/R',
+    'Choppy':   'No patterns — sit out'
+  };
+  const rCol = regimeColors[regime.label] || '#6b7280';
+  html += sec('2 — Market Regime', `
+    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:10px;">
+      ${pill('Regime', regime.label, rCol, null)}
+      ${pill('Direction', regime.direction, '#e2e8f0', null)}
+      ${pill('ATR Trend', regime.atr_trend, '#e2e8f0', null)}
+    </div>
+    <div class="muted" style="font-size:0.85em;">Valid patterns today: <strong style="color:#e2e8f0;">${patternMenus[regime.label] || '—'}</strong></div>`);
 
-  const cards = activeSymbols.map(sym => {
-    const d = symbols[sym];
-    const eod = d.eod_outcome || {};
-    const grade = cacheData.day_quality.grade;
+  // ── SECTION 3: PATTERN OUTCOMES ─────────────────────────────────────────
+  const patterns = cacheData.active_patterns;
+  if (patterns.length === 0) {
+    html += sec('3 — Pattern Outcomes', '<div class="muted">No patterns detected today.</div>');
+  } else {
+    const patternCards = patterns.map(p => {
+      const oc = p.outcome || {};
+      const lv = p.levels || {};
+      const dirArrow = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
+      const dirColor = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#94a3b8';
 
-    // Gap section — all values pre-computed in Python
-    let gapHTML = '';
-    if (d.gap_type !== 'none') {
-      const dir = d.gap_type === 'up' ? '▲' : '▼';
-      const dirLabel = d.gap_type === 'up' ? 'Gap Up' : 'Gap Down';
-      const filledColor = eod.gap_filled ? '#10b981' : '#f59e0b';
-      const filledLabel = eod.gap_filled ? '✓ Filled' : '○ Open';
-      gapHTML = `
-        <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
-          <span style="color: ${d.gap_type === 'up' ? '#10b981' : '#ef4444'}; font-weight:bold;">${dir} ${dirLabel} ${d.gap_pct > 0 ? '+' : ''}${d.gap_pct.toFixed(2)}%</span>
-          <span style="color:${filledColor}; font-size:0.9em;">${filledLabel}</span>
+      let outcomeHTML = '';
+      if (oc.next_day) {
+        outcomeHTML = `<div style="color:#f59e0b; font-size:0.85em; margin-top:8px;">Next session setup — ${oc.note || ''}</div>`;
+      } else if (p.pattern === 'ORB') {
+        const orbDirLabel = oc.direction === 'up' ? '▲ Up' : oc.direction === 'down' ? '▼ Down' : '—';
+        outcomeHTML = `<div style="margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; font-size:0.85em;">
+          ${outcomeBadge(oc.breached, `Breached ${orbDirLabel}`, 'No breach')}
+          &nbsp;
+          ${outcomeBadge(oc.hit_t1, '✓ T1 hit', 'T1 not reached')}
         </div>`;
-    }
-
-    // ORB section — all values pre-computed in Python (orb_breached, orb_direction, orb_hit_t1)
-    let orbHTML = '';
-    if (d.patterns && d.patterns.orb_qualified) {
-      if (eod.orb_high != null) {
-        const dirLabel = eod.orb_direction === 'up' ? '▲ Up' : eod.orb_direction === 'down' ? '▼ Down' : '—';
-        const t1Color = eod.orb_hit_t1 ? '#10b981' : eod.orb_breached ? '#f59e0b' : '#6b7280';
-        const t1Label = eod.orb_hit_t1 ? '✓ T1 hit' : eod.orb_breached ? 'Breached, T1 missed' : 'No breach';
-        orbHTML = `
-          <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px; flex-wrap:wrap;">
-            <span style="font-weight:bold;">ORB</span>
-            <span class="muted" style="font-size:0.9em;">$${eod.orb_low} – $${eod.orb_high}</span>
-            ${eod.orb_breached ? `<span style="color:#94a3b8; font-size:0.9em;">Broke ${dirLabel}</span>` : '<span style="color:#6b7280; font-size:0.9em;">No breach</span>'}
-            <span style="color:${t1Color}; font-size:0.9em;">${t1Label}</span>
-          </div>`;
-      } else {
-        orbHTML = `
-          <div style="margin-bottom:8px; color:#6b7280; font-size:0.9em;">ORB qualified — no intraday data</div>`;
+      } else if (p.pattern === 'Gap') {
+        outcomeHTML = `<div style="margin-top:8px; font-size:0.85em;">
+          ${outcomeBadge(oc.filled, '✓ Gap filled', 'Gap remains open')}
+        </div>`;
       }
-    }
 
-    // Day range — pre-computed in Python as day_range ($), day_atr_multiple, day_range_pct
-    const rangeHTML = eod.day_atr_multiple > 0
-      ? `<div class="muted" style="font-size:0.85em;">Day range: $${eod.day_range} (${eod.day_atr_multiple}× ATR) &nbsp;|&nbsp; ${eod.day_range_pct}%</div>`
-      : '';
+      let levelsHTML = '';
+      if (p.pattern === 'ORB' && lv.orb_high != null) {
+        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Range $${lv.orb_low} – $${lv.orb_high} &nbsp;|&nbsp; T1↑ $${lv.t1_up} / T1↓ $${lv.t1_down}</div>`;
+      } else if (p.pattern === 'Gap') {
+        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Fill target $${lv.fill_target} &nbsp;|&nbsp; Continuation T1 $${lv.t1_continuation}</div>`;
+      } else if (lv.entry != null) {
+        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Entry $${lv.entry} &nbsp;|&nbsp; Stop $${lv.stop} &nbsp;|&nbsp; T1 $${lv.t1}${lv.t2 ? ' / T2 $' + lv.t2 : ''}</div>`;
+      }
 
-    return `
-      <div style="background: var(--bg-card, #1a1a2e); border: 1px solid #2a2a3e; border-radius: 8px; padding: 14px 16px; margin-bottom: 12px;">
-        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
-          <span style="font-weight:bold; font-size:1.05em;">${sym}</span>
-          <span style="background:${gradeColor(grade)}; color:white; padding:2px 10px; border-radius:4px; font-size:0.85em;">${grade}</span>
+      return `<div style="border:1px solid #2a2a3e; border-radius:6px; padding:12px 14px; margin-bottom:8px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span style="font-weight:bold;">${p.symbol}</span>
+          <span style="color:#94a3b8; font-size:0.85em;">${p.pattern}</span>
+          <span style="color:${dirColor}; font-weight:bold;">${dirArrow}</span>
+          <span class="muted" style="font-size:0.8em; margin-left:auto;">${p.notes}</span>
         </div>
-        <div style="color:#94a3b8; font-size:0.85em; margin-bottom:10px;">
-          O ${d.open} &nbsp; H ${d.high} &nbsp; L ${d.low} &nbsp; C ${d.close}
-        </div>
-        ${gapHTML}${orbHTML}${rangeHTML}
+        ${levelsHTML}
+        ${outcomeHTML}
       </div>`;
-  }).join('');
+    }).join('');
+    html += sec('3 — Pattern Outcomes', patternCards);
+  }
 
-  el.innerHTML = warningHTML + cards;
+  // ── SECTION 4: CONFLUENCE REVIEW ────────────────────────────────────────
+  if (!scored || scored.length === 0) {
+    html += sec('4 — Confluence Review', '<div class="muted">No trades met confluence threshold (3+).</div>');
+  } else {
+    const confCards = scored.map(trade => {
+      const sizeColor = trade.score >= 7 ? '#10b981' : trade.score >= 5 ? '#f59e0b' : '#3b82f6';
+      const sizeLabel = trade.score >= 7 ? 'Full Size' : trade.score >= 5 ? '75% Size' : '50% Size';
+      let checksHTML = Object.entries(trade.checks).map(([k, v]) =>
+        `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
+      ).join('');
+      return `<div style="border:2px solid ${sizeColor}; border-radius:6px; padding:12px 14px; width:380px; box-sizing:border-box;">
+        <div style="font-weight:bold;">${trade.symbol} — ${trade.pattern}</div>
+        <div style="margin:6px 0;">
+          <span style="background:${sizeColor}; color:white; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:bold;">${trade.score}/9 ${getDotsHTML(trade.score, 9)}</span>
+          <span style="margin-left:8px; font-size:0.8em; color:${sizeColor}; font-weight:bold;">${sizeLabel}</span>
+        </div>
+        ${checksHTML}
+        <div style="margin-top:6px; font-size:0.8em;">Squeeze: ${squeezeHTML(trade.squeeze)}</div>
+      </div>`;
+    }).join('');
+    html += sec('4 — Confluence Review', `<div style="display:flex; flex-wrap:wrap; gap:12px;">${confCards}</div>`);
+  }
+
+  // ── SECTION 5: TRADE LEVELS & OUTCOMES ──────────────────────────────────
+  const tradablePatterns = patterns.filter(p => p.levels && Object.keys(p.levels).length > 0);
+  if (tradablePatterns.length === 0) {
+    html += sec('5 — Trade Levels & Outcomes', '<div class="muted">No level data available.</div>');
+  } else {
+    const tradeRows = tradablePatterns.map(p => {
+      const lv = p.levels;
+      const oc = p.outcome || {};
+      const isNextDay = oc.next_day;
+
+      let rowsHTML = '';
+      if (p.pattern === 'ORB') {
+        const hitColor = oc.hit_t1 ? '#10b981' : oc.breached ? '#f59e0b' : '#6b7280';
+        rowsHTML = `
+          <tr><td class="muted">Watch range</td><td>$${lv.orb_low} – $${lv.orb_high}</td><td style="color:${oc.breached ? '#e2e8f0' : '#6b7280'};">${oc.breached ? (oc.direction === 'up' ? '▲ broke up' : '▼ broke down') : 'No breach'}</td></tr>
+          <tr><td class="muted">T1 (1.5× ATR)</td><td>↑$${lv.t1_up} / ↓$${lv.t1_down}</td><td style="color:${hitColor};">${oc.hit_t1 ? '✓ Hit' : '—'}</td></tr>
+          <tr><td class="muted">T2 (2× ATR)</td><td>↑$${lv.t2_up} / ↓$${lv.t2_down}</td><td class="muted">—</td></tr>`;
+      } else if (p.pattern === 'Gap') {
+        const fillColor = oc.filled ? '#10b981' : '#6b7280';
+        rowsHTML = `
+          <tr><td class="muted">Fill target</td><td>$${lv.fill_target}</td><td style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</td></tr>
+          <tr><td class="muted">Continuation T1</td><td>$${lv.t1_continuation}</td><td class="muted">—</td></tr>
+          <tr><td class="muted">Continuation T2</td><td>$${lv.t2_continuation}</td><td class="muted">—</td></tr>`;
+      } else {
+        rowsHTML = `
+          <tr><td class="muted">Entry</td><td>$${lv.entry}</td><td style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</td></tr>
+          <tr><td class="muted">Stop</td><td>$${lv.stop}</td><td class="muted">—</td></tr>
+          <tr><td class="muted">T1 (1.5×)</td><td>$${lv.t1}</td><td class="muted">—</td></tr>
+          ${lv.t2 ? `<tr><td class="muted">T2 (2×)</td><td>$${lv.t2}</td><td class="muted">—</td></tr>` : ''}`;
+      }
+
+      return `<div style="margin-bottom:16px;">
+        <div style="font-weight:bold; margin-bottom:8px;">${p.symbol} — ${p.pattern}</div>
+        <table style="font-size:0.85em; border-collapse:collapse; width:100%; max-width:500px;">
+          <thead><tr style="color:#6b7280; font-size:0.8em;"><th style="text-align:left; padding:2px 12px 6px 0;">Level</th><th style="text-align:left; padding:2px 12px 6px 0;">Price</th><th style="text-align:left; padding:2px 0 6px 0;">Outcome</th></tr></thead>
+          <tbody>${rowsHTML}</tbody>
+        </table>
+      </div>`;
+    }).join('');
+    html += sec('5 — Trade Levels & Outcomes', tradeRows);
+  }
+
+  el.innerHTML = html;
 }
 
 // =============================================================================

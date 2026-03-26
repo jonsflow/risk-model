@@ -993,37 +993,101 @@ def generate_trading_signals():
             'eod_outcome': eod_outcome
         }
 
-        # Track active patterns
+        # Track active patterns (include pre-computed levels + outcome for EOD review)
         if orb_qualified:
+            orb_h = eod_outcome.get('orb_high') or 0.0
+            orb_l = eod_outcome.get('orb_low') or 0.0
             output['active_patterns'].append({
                 'symbol': symbol,
                 'pattern': 'ORB',
                 'direction': 'watch',
-                'notes': f"ATR {atr_current:.2f} > avg {atr_20day_avg:.2f}, range {opening_range:.2f}"
+                'notes': f"ATR {atr_current:.2f} > avg {atr_20day_avg:.2f}, range {opening_range:.2f}",
+                'levels': {
+                    'orb_high': eod_outcome.get('orb_high'),
+                    'orb_low': eod_outcome.get('orb_low'),
+                    't1_up':   round(orb_h + 1.5 * atr_current, 2) if orb_h else None,
+                    't1_down': round(orb_l - 1.5 * atr_current, 2) if orb_l else None,
+                    't2_up':   round(orb_h + 2.0 * atr_current, 2) if orb_h else None,
+                    't2_down': round(orb_l - 2.0 * atr_current, 2) if orb_l else None,
+                    'atr': round(atr_current, 2),
+                },
+                'outcome': {
+                    'next_day': False,
+                    'breached':  eod_outcome.get('orb_breached', False),
+                    'direction': eod_outcome.get('orb_direction', 'none'),
+                    'hit_t1':    eod_outcome.get('orb_hit_t1', False),
+                }
             })
 
         if gap['gap_strong']:
+            prev_close_val = round(points[-2][1]['close'], 2)
+            today_open_val = round(today_ohlcv['open'], 2)
+            is_up_gap = gap['gap_type'] == 'up'
+            mult = 1 if is_up_gap else -1
             output['active_patterns'].append({
                 'symbol': symbol,
                 'pattern': 'Gap',
                 'direction': gap['gap_type'],
-                'notes': f"Gap {gap['gap_pct']:.2f}%"
+                'notes': f"Gap {gap['gap_pct']:.2f}%",
+                'levels': {
+                    'prev_close':       prev_close_val,
+                    'today_open':       today_open_val,
+                    'fill_target':      prev_close_val,
+                    't1_continuation':  round(today_open_val + 1.5 * atr_current * mult, 2),
+                    't2_continuation':  round(today_open_val + 2.0 * atr_current * mult, 2),
+                    'atr': round(atr_current, 2),
+                },
+                'outcome': {
+                    'next_day': False,
+                    'filled': eod_outcome.get('gap_filled', False),
+                }
             })
 
         if engulfing in ['bullish', 'bearish']:
+            is_up_eng = engulfing == 'bullish'
+            mult_eng = 1 if is_up_eng else -1
+            entry_eng = round(today_ohlcv['high'] if is_up_eng else today_ohlcv['low'], 2)
+            stop_eng  = round(today_ohlcv['low']  if is_up_eng else today_ohlcv['high'], 2)
             output['active_patterns'].append({
                 'symbol': symbol,
                 'pattern': 'Engulfing',
-                'direction': 'up' if engulfing == 'bullish' else 'down',
-                'notes': f"{'Bullish' if engulfing == 'bullish' else 'Bearish'} engulfing, vol confirmed"
+                'direction': 'up' if is_up_eng else 'down',
+                'notes': f"{'Bullish' if is_up_eng else 'Bearish'} engulfing, vol confirmed",
+                'levels': {
+                    'entry': entry_eng,
+                    'stop':  stop_eng,
+                    't1':    round(entry_eng + 1.5 * atr_current * mult_eng, 2),
+                    't2':    round(entry_eng + 2.0 * atr_current * mult_eng, 2),
+                    'atr':   round(atr_current, 2),
+                },
+                'outcome': {
+                    'next_day': True,
+                    'note': f"Enter {'above' if is_up_eng else 'below'} ${entry_eng:.2f} next session"
+                }
             })
 
         if outside_day:
+            is_up_od = outside_day_dir == 'up'
+            mult_od = 1 if is_up_od else -1
+            entry_od = round(today_ohlcv['high'] if is_up_od else today_ohlcv['low'], 2)
+            stop_od  = round(today_ohlcv['low']  if is_up_od else today_ohlcv['high'], 2)
+            od_range = today_ohlcv['high'] - today_ohlcv['low']
             output['active_patterns'].append({
                 'symbol': symbol,
                 'pattern': 'Outside Day',
                 'direction': outside_day_dir,
-                'notes': f"Close {'upper' if outside_day_dir == 'up' else 'lower'} 25%: {today_ohlcv['close']:.2f} (H {today_ohlcv['high']:.2f} / L {today_ohlcv['low']:.2f})"
+                'notes': f"Close {'upper' if is_up_od else 'lower'} 25%: {today_ohlcv['close']:.2f} (H {today_ohlcv['high']:.2f} / L {today_ohlcv['low']:.2f})",
+                'levels': {
+                    'entry':      entry_od,
+                    'stop':       stop_od,
+                    't1':         round(entry_od + 1.5 * od_range * mult_od, 2),
+                    'range_size': round(od_range, 2),
+                    'atr':        round(atr_current, 2),
+                },
+                'outcome': {
+                    'next_day': True,
+                    'note': f"Enter {'above' if is_up_od else 'below'} ${entry_od:.2f} next session"
+                }
             })
 
     output['regime'] = detect_regime(regime_symbols, daily_data, hourly_data)

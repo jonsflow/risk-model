@@ -1,5 +1,5 @@
 {
-  "generated": "2026-03-26T02:33:20.482967+00:00",
+  "generated": "2026-03-26T04:29:04.323421+00:00",
   "cache_type": "morning",
   "day_quality": {
     "grade": "B",
@@ -536,37 +536,118 @@
       "symbol": "SPY",
       "pattern": "ORB",
       "direction": "watch",
-      "notes": "ATR 10.18 > avg 9.64, range 8.95"
+      "notes": "ATR 10.18 > avg 9.64, range 8.95",
+      "levels": {
+        "orb_high": 660.89,
+        "orb_low": 654.24,
+        "t1_up": 676.15,
+        "t1_down": 638.98,
+        "t2_up": 681.24,
+        "t2_down": 633.89,
+        "atr": 10.18
+      },
+      "outcome": {
+        "next_day": false,
+        "breached": false,
+        "direction": "none",
+        "hit_t1": false
+      }
     },
     {
       "symbol": "QQQ",
       "pattern": "ORB",
       "direction": "watch",
-      "notes": "ATR 9.97 > avg 10.52, range 11.55"
+      "notes": "ATR 9.97 > avg 10.52, range 11.55",
+      "levels": {
+        "orb_high": 591.37,
+        "orb_low": 585.69,
+        "t1_up": 606.32,
+        "t1_down": 570.74,
+        "t2_up": 611.31,
+        "t2_down": 565.75,
+        "atr": 9.97
+      },
+      "outcome": {
+        "next_day": false,
+        "breached": false,
+        "direction": "none",
+        "hit_t1": false
+      }
     },
     {
       "symbol": "SMH",
       "pattern": "ORB",
       "direction": "watch",
-      "notes": "ATR 11.78 > avg 12.25, range 18.16"
+      "notes": "ATR 11.78 > avg 12.25, range 18.16",
+      "levels": {
+        "orb_high": 402.5,
+        "orb_low": 395.74,
+        "t1_up": 420.17,
+        "t1_down": 378.07,
+        "t2_up": 426.06,
+        "t2_down": 372.18,
+        "atr": 11.78
+      },
+      "outcome": {
+        "next_day": false,
+        "breached": false,
+        "direction": "none",
+        "hit_t1": false
+      }
     },
     {
       "symbol": "GLD",
       "pattern": "Gap",
       "direction": "up",
-      "notes": "Gap 3.85%"
+      "notes": "Gap 3.85%",
+      "levels": {
+        "prev_close": 404.13,
+        "today_open": 419.7,
+        "fill_target": 404.13,
+        "t1_continuation": 437.06,
+        "t2_continuation": 442.84,
+        "atr": 11.57
+      },
+      "outcome": {
+        "next_day": false,
+        "filled": false
+      }
     },
     {
       "symbol": "SLV",
       "pattern": "Gap",
       "direction": "up",
-      "notes": "Gap 4.91%"
+      "notes": "Gap 4.91%",
+      "levels": {
+        "prev_close": 62.95,
+        "today_open": 66.04,
+        "fill_target": 62.95,
+        "t1_continuation": 71.24,
+        "t2_continuation": 72.97,
+        "atr": 3.47
+      },
+      "outcome": {
+        "next_day": false,
+        "filled": false
+      }
     },
     {
       "symbol": "USO",
       "pattern": "Gap",
       "direction": "down",
-      "notes": "Gap -4.58%"
+      "notes": "Gap -4.58%",
+      "levels": {
+        "prev_close": 114.54,
+        "today_open": 109.29,
+        "fill_target": 114.54,
+        "t1_continuation": 94.81,
+        "t2_continuation": 89.98,
+        "atr": 9.65
+      },
+      "outcome": {
+        "next_day": false,
+        "filled": false
+      }
     }
   ]
 }
