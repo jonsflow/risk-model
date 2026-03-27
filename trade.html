@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Trade Recommendations</title>
+  <link rel="stylesheet" href="styles.css">
+  <meta name="description" content="Daily trade recommendations based on trading rules framework and technical analysis." />
+</head>
+<body>
+  <nav class="site-nav">
+    <a href="index.html" class="nav-link">Divergence</a>
+    <a href="macro.html" class="nav-link">Macro Model</a>
+    <a href="credit.html" class="nav-link">Credit Spread</a>
+    <a href="gov_data.html" class="nav-link">Gov Data</a>
+    <a href="fomc.html" class="nav-link">FOMC</a>
+    <a href="trade.html" class="nav-link active">Trade</a>
+  </nav>
+
+  <!-- Disclaimer -->
+  <div style="background: #1c1a14; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px 16px; margin-bottom: 12px;">
+    <span style="color: #f59e0b; font-weight: bold; margin-right: 8px;">⚠ Work in Progress</span>
+    <span class="muted" style="font-size: 0.85em;">This framework is experimental and under active development. Not financial advice — for research purposes only.</span>
+  </div>
+
+  <!-- Header Section -->
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">Trade Recommendations</h1>
+        <div class="muted" id="headerMeta">Loading data…</div>
+      </div>
+      <div id="dayQualityBadge" style="font-size: 1.2em; font-weight: bold;"></div>
+    </div>
+  </div>
+
+  <!-- Sub-tab bar -->
+  <div class="tab-bar" style="margin: 0 0 16px 0;">
+    <button class="tab-btn active" data-tab="morning" onclick="switchTradeTab('morning')">Morning Setup</button>
+    <button class="tab-btn" data-tab="eod" onclick="switchTradeTab('eod')">End of Day</button>
+  </div>
+
+  <!-- Morning Setup panel -->
+  <div id="tab-morning" class="tab-panel active">
+
+    <!-- Step 1: Day Quality Gate -->
+    <div class="card" id="step-1">
+      <h2>Step 1 — Day Quality Gate</h2>
+      <div id="step1Content"></div>
+    </div>
+
+    <!-- Step 2: Market Regime -->
+    <div class="card" id="step-2">
+      <h2>Step 2 — Market Regime</h2>
+      <div id="step2Content"></div>
+    </div>
+
+    <!-- Step 3: Pattern Scanner -->
+    <div class="card" id="step-3">
+      <h2>Step 3 — Pattern Scanner</h2>
+      <div id="step3Content"></div>
+    </div>
+
+    <!-- Step 4: Confluence Scoring -->
+    <div class="card" id="step-4">
+      <h2>Step 4 — Confluence Scoring</h2>
+      <div id="step4Content"></div>
+    </div>
+
+    <!-- Step 5: Trade Recommendations -->
+    <div class="card" id="step-5">
+      <h2>Step 5 — Trade Recommendations</h2>
+      <div id="step5Content"></div>
+    </div>
+
+    <!-- Step 6: Position Size Calculator -->
+    <div class="card" id="step-6">
+      <h2>Step 6 — Position Size Calculator</h2>
+      <div id="step6Content"></div>
+    </div>
+
+  </div>
+
+  <!-- End of Day panel -->
+  <div id="tab-eod" class="tab-panel">
+    <div class="card">
+      <h2>End of Day — Setup Outcomes</h2>
+      <div id="eodContent">Loading…</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 18px;">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+      <br><span style="color:#6b7280;">Not financial advice — for research and informational purposes only.</span>
+    </div>
+  </div>
+
+  <script src="trade_app.js"></script>
+</body>
+</html>

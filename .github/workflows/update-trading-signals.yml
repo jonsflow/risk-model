@@ -1,20 +1,20 @@
-name: Update market data (Yahoo Finance → data/*.csv)
+name: Update trading signals (morning premarket)
 
 on:
   schedule:
-    # Once per day at 21:00 UTC on weekdays (4 PM ET during EST, 5 PM ET during EDT)
-    - cron: "0 21 * * 1-5"
+    # 9:00 AM ET weekdays (13:00 UTC during EST, 14:00 UTC during EDT)
+    - cron: "0 13 * * 1-5"
   workflow_dispatch:
 
 permissions:
   contents: write
 
 concurrency:
-  group: update-data
+  group: update-trading-signals
   cancel-in-progress: false
 
 jobs:
-  update:
+  update-signals:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -33,17 +33,14 @@ jobs:
           git config user.email "github-actions@github.com"
           git pull --rebase origin main
 
-      - name: Fetch hourly + daily data from Yahoo Finance
-        run: python3 fetch_data.py
-
-      - name: Generate divergence + macro cache
-        run: python3 generate_cache.py
+      - name: Fetch premarket hourly data
+        run: python3 fetch_trading_hourly.py
 
       - name: Generate trading signals cache
         run: python3 generate_trading_cache.py
 
-      - name: Commit and push CSV + cache data (if any)
+      - name: Commit and push updated data
         run: |
-          git add data/*.csv data/last_updated.txt data/cache/*.json
-          git diff --cached --quiet || git commit -m "Update data and cache (Yahoo Finance + analysis)"
+          git add data/*_hourly.csv data/cache/trading_signals.json
+          git diff --cached --quiet || git commit -m "Update trading signals (premarket)"
           git push

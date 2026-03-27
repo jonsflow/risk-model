@@ -72,7 +72,7 @@ def write_bundle(all_series):
     Compact array pairs keep file size ~30% smaller than named-key objects.
     """
     bundle = {
-        "fetched_at": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "fetched_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "series": {},
     }
     for series_id, s in all_series.items():
