@@ -716,43 +716,55 @@ function renderEodOutcomes(scored) {
       const dirArrow = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
       const dirColor = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#94a3b8';
 
-      let outcomeHTML = '';
+      // Top-right outcome badge
+      let outcomeLabel, outcomeColor;
       if (oc.next_day) {
-        outcomeHTML = `<div style="color:#f59e0b; font-size:0.85em; margin-top:8px;">Next session setup — ${oc.note || ''}</div>`;
+        outcomeLabel = 'Next session'; outcomeColor = '#f59e0b';
       } else if (p.pattern === 'ORB') {
-        const orbDirLabel = oc.direction === 'up' ? '▲ Up' : oc.direction === 'down' ? '▼ Down' : '—';
-        outcomeHTML = `<div style="margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; font-size:0.85em;">
-          ${outcomeBadge(oc.breached, `Breached ${orbDirLabel}`, 'No breach')}
-          &nbsp;
-          ${outcomeBadge(oc.hit_t1, '✓ T1 hit', 'T1 not reached')}
-        </div>`;
+        if (oc.hit_t1)        { outcomeLabel = '✓ T1 Hit';   outcomeColor = '#10b981'; }
+        else if (oc.breached) { outcomeLabel = 'Breached';    outcomeColor = '#f59e0b'; }
+        else                  { outcomeLabel = 'No breach';   outcomeColor = '#6b7280'; }
       } else if (p.pattern === 'Gap') {
-        outcomeHTML = `<div style="margin-top:8px; font-size:0.85em;">
-          ${outcomeBadge(oc.filled, '✓ Gap filled', 'Gap remains open')}
-        </div>`;
+        if (oc.filled) { outcomeLabel = '✓ Filled'; outcomeColor = '#10b981'; }
+        else           { outcomeLabel = 'Open';      outcomeColor = '#f59e0b'; }
+      } else {
+        outcomeLabel = '—'; outcomeColor = '#6b7280';
       }
 
-      let levelsHTML = '';
+      // Levels box (dark background, same as morning step 5)
+      let levelsInner = '';
       if (p.pattern === 'ORB' && lv.orb_high != null) {
-        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Range $${lv.orb_low} – $${lv.orb_high} &nbsp;|&nbsp; T1↑ $${lv.t1_up} / T1↓ $${lv.t1_down}</div>`;
+        levelsInner = `
+          <div><strong>Range:</strong> $${lv.orb_low} – $${lv.orb_high}</div>
+          <div><strong>T1↑:</strong> $${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓:</strong> $${lv.t1_down}</div>
+          <div><strong>T2↑:</strong> $${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓:</strong> $${lv.t2_down}</div>`;
       } else if (p.pattern === 'Gap') {
-        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Fill target $${lv.fill_target} &nbsp;|&nbsp; Continuation T1 $${lv.t1_continuation}</div>`;
+        levelsInner = `
+          <div><strong>Fill target:</strong> $${lv.fill_target}</div>
+          <div><strong>Cont. T1:</strong> $${lv.t1_continuation} &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2_continuation}</div>`;
       } else if (lv.entry != null) {
-        levelsHTML = `<div class="muted" style="font-size:0.8em; margin-top:6px;">Entry $${lv.entry} &nbsp;|&nbsp; Stop $${lv.stop} &nbsp;|&nbsp; T1 $${lv.t1}${lv.t2 ? ' / T2 $' + lv.t2 : ''}</div>`;
+        levelsInner = `
+          <div><strong>Entry:</strong> $${lv.entry}</div>
+          <div><strong>Stop:</strong> $${lv.stop}</div>
+          <div><strong>T1:</strong> $${lv.t1}${lv.t2 ? ` &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2}` : ''}</div>`;
       }
 
-      return `<div style="border:1px solid #2a2a3e; border-radius:6px; padding:12px 14px; margin-bottom:8px;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <span style="font-weight:bold;">${p.symbol}</span>
-          <span style="color:#94a3b8; font-size:0.85em;">${p.pattern}</span>
-          <span style="color:${dirColor}; font-weight:bold;">${dirArrow}</span>
-          <span class="muted" style="font-size:0.8em; margin-left:auto;">${p.notes}</span>
-        </div>
-        ${levelsHTML}
-        ${outcomeHTML}
-      </div>`;
+      return `
+        <div style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div>
+              <strong style="font-size: 1.1em;">${p.symbol}</strong>
+              <span style="margin-left: 8px; background: ${dirColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                ${p.pattern} ${dirArrow}
+              </span>
+            </div>
+            <span style="color: ${outcomeColor}; font-weight: bold; font-size: 0.85em;">${outcomeLabel}</span>
+          </div>
+          <div class="muted" style="font-size: 0.8em; margin-bottom: 8px;">${p.notes}</div>
+          ${levelsInner ? `<div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em;">${levelsInner}</div>` : ''}
+        </div>`;
     }).join('');
-    html += sec('3 — Pattern Outcomes', patternCards);
+    html += sec('3 — Pattern Outcomes', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${patternCards}</div>`);
   }
 
   // ── SECTION 4: CONFLUENCE REVIEW ────────────────────────────────────────
@@ -765,17 +777,23 @@ function renderEodOutcomes(scored) {
       let checksHTML = Object.entries(trade.checks).map(([k, v]) =>
         `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
       ).join('');
-      return `<div style="border:2px solid ${sizeColor}; border-radius:6px; padding:12px 14px; width:380px; box-sizing:border-box;">
-        <div style="font-weight:bold;">${trade.symbol} — ${trade.pattern}</div>
-        <div style="margin:6px 0;">
-          <span style="background:${sizeColor}; color:white; padding:2px 8px; border-radius:4px; font-size:0.8em; font-weight:bold;">${trade.score}/9 ${getDotsHTML(trade.score, 9)}</span>
-          <span style="margin-left:8px; font-size:0.8em; color:${sizeColor}; font-weight:bold;">${sizeLabel}</span>
-        </div>
-        ${checksHTML}
-        <div style="margin-top:6px; font-size:0.8em;">Squeeze: ${squeezeHTML(trade.squeeze)}</div>
-      </div>`;
+      return `
+        <div style="border: 2px solid ${sizeColor}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div>
+              <strong style="font-size: 1.1em;">${trade.symbol}</strong>
+              <span style="margin-left: 8px; background: ${sizeColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                ${trade.pattern} ${trade.direction === 'up' ? '▲' : trade.direction === 'down' ? '▼' : '—'}
+              </span>
+            </div>
+            <span style="font-weight: bold; color: ${sizeColor}; font-size: 0.85em;">${trade.score}/9 ${getDotsHTML(trade.score, 9)}</span>
+          </div>
+          <div style="font-size: 0.8em; font-weight: bold; color: ${sizeColor}; margin-bottom: 8px;">${sizeLabel}</div>
+          <div style="font-size: 0.8em;">${checksHTML}</div>
+          <div style="margin-top: 8px; font-size: 0.8em;">Squeeze: ${squeezeHTML(trade.squeeze)}</div>
+        </div>`;
     }).join('');
-    html += sec('4 — Confluence Review', `<div style="display:flex; flex-wrap:wrap; gap:12px;">${confCards}</div>`);
+    html += sec('4 — Confluence Review', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${confCards}</div>`);
   }
 
   // ── SECTION 5: TRADE LEVELS & OUTCOMES ──────────────────────────────────
@@ -783,41 +801,73 @@ function renderEodOutcomes(scored) {
   if (tradablePatterns.length === 0) {
     html += sec('5 — Trade Levels & Outcomes', '<div class="muted">No level data available.</div>');
   } else {
-    const tradeRows = tradablePatterns.map(p => {
+    const tradeCards = tradablePatterns.map(p => {
       const lv = p.levels;
       const oc = p.outcome || {};
+      const d  = cacheData.symbols[p.symbol];
+      const eod = d.eod_outcome || {};
       const isNextDay = oc.next_day;
 
-      let rowsHTML = '';
+      // Match to scored entry to get confluence color
+      const scoredEntry = scored ? scored.find(s => s.symbol === p.symbol && s.pattern === p.pattern) : null;
+      const score = scoredEntry ? scoredEntry.score : 0;
+      const sizeColor = score >= 7 ? '#10b981' : score >= 5 ? '#f59e0b' : score >= 3 ? '#3b82f6' : '#6b7280';
+      const dirArrow = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
+
+      // Entry/stop/target rows with inline outcome column
+      let levelsInner = '';
       if (p.pattern === 'ORB') {
-        const hitColor = oc.hit_t1 ? '#10b981' : oc.breached ? '#f59e0b' : '#6b7280';
-        rowsHTML = `
-          <tr><td class="muted">Watch range</td><td>$${lv.orb_low} – $${lv.orb_high}</td><td style="color:${oc.breached ? '#e2e8f0' : '#6b7280'};">${oc.breached ? (oc.direction === 'up' ? '▲ broke up' : '▼ broke down') : 'No breach'}</td></tr>
-          <tr><td class="muted">T1 (1.5× ATR)</td><td>↑$${lv.t1_up} / ↓$${lv.t1_down}</td><td style="color:${hitColor};">${oc.hit_t1 ? '✓ Hit' : '—'}</td></tr>
-          <tr><td class="muted">T2 (2× ATR)</td><td>↑$${lv.t2_up} / ↓$${lv.t2_down}</td><td class="muted">—</td></tr>`;
+        const bColor  = oc.breached ? (oc.direction === 'up' ? '#10b981' : '#ef4444') : '#6b7280';
+        const t1Color = oc.hit_t1 ? '#10b981' : oc.breached ? '#f59e0b' : '#6b7280';
+        levelsInner = `
+          <div style="display:flex; justify-content:space-between;"><span><strong>Range:</strong> $${lv.orb_low} – $${lv.orb_high}</span><span style="color:${bColor};">${oc.breached ? (oc.direction === 'up' ? '▲ Broke up' : '▼ Broke down') : 'No breach'}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>T1↑</strong> $${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓</strong> $${lv.t1_down}</span><span style="color:${t1Color};">${oc.hit_t1 ? '✓ Hit' : '—'}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>T2↑</strong> $${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓</strong> $${lv.t2_down}</span><span class="muted">—</span></div>`;
       } else if (p.pattern === 'Gap') {
         const fillColor = oc.filled ? '#10b981' : '#6b7280';
-        rowsHTML = `
-          <tr><td class="muted">Fill target</td><td>$${lv.fill_target}</td><td style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</td></tr>
-          <tr><td class="muted">Continuation T1</td><td>$${lv.t1_continuation}</td><td class="muted">—</td></tr>
-          <tr><td class="muted">Continuation T2</td><td>$${lv.t2_continuation}</td><td class="muted">—</td></tr>`;
+        levelsInner = `
+          <div style="display:flex; justify-content:space-between;"><span><strong>Fill target:</strong> $${lv.fill_target}</span><span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>Cont. T1:</strong> $${lv.t1_continuation}</span><span class="muted">—</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>Cont. T2:</strong> $${lv.t2_continuation}</span><span class="muted">—</span></div>`;
       } else {
-        rowsHTML = `
-          <tr><td class="muted">Entry</td><td>$${lv.entry}</td><td style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</td></tr>
-          <tr><td class="muted">Stop</td><td>$${lv.stop}</td><td class="muted">—</td></tr>
-          <tr><td class="muted">T1 (1.5×)</td><td>$${lv.t1}</td><td class="muted">—</td></tr>
-          ${lv.t2 ? `<tr><td class="muted">T2 (2×)</td><td>$${lv.t2}</td><td class="muted">—</td></tr>` : ''}`;
+        levelsInner = `
+          <div style="display:flex; justify-content:space-between;"><span><strong>Entry:</strong> $${lv.entry}</span><span style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>Stop:</strong> $${lv.stop}</span><span class="muted">—</span></div>
+          <div style="display:flex; justify-content:space-between;"><span><strong>T1 (1.5×):</strong> $${lv.t1}</span><span class="muted">—</span></div>
+          ${lv.t2 ? `<div style="display:flex; justify-content:space-between;"><span><strong>T2 (2×):</strong> $${lv.t2}</span><span class="muted">—</span></div>` : ''}`;
       }
 
-      return `<div style="margin-bottom:16px;">
-        <div style="font-weight:bold; margin-bottom:8px;">${p.symbol} — ${p.pattern}</div>
-        <table style="font-size:0.85em; border-collapse:collapse; width:100%; max-width:500px;">
-          <thead><tr style="color:#6b7280; font-size:0.8em;"><th style="text-align:left; padding:2px 12px 6px 0;">Level</th><th style="text-align:left; padding:2px 12px 6px 0;">Price</th><th style="text-align:left; padding:2px 0 6px 0;">Outcome</th></tr></thead>
-          <tbody>${rowsHTML}</tbody>
-        </table>
-      </div>`;
+      return `
+        <div style="border: 2px solid ${sizeColor}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 1.1em;">${p.symbol}</strong>
+              <span style="margin-left: 8px; background: ${sizeColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                ${p.pattern} ${dirArrow}
+              </span>
+            </div>
+            ${score > 0 ? `<span style="font-weight: bold; color: ${sizeColor}; font-size: 0.85em;">${score}/9 ${getDotsHTML(score, 9)}</span>` : ''}
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; font-size: 0.85em;">
+            <div><div class="muted">Close</div><strong>$${d.close}</strong></div>
+            <div><div class="muted">ATR (14)</div><strong>${d.atr_14}</strong></div>
+          </div>
+          <div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em; margin-bottom: 10px;">
+            ${levelsInner}
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.8em;">
+            <div style="background: #22242a; padding: 8px; border-radius: 8px;">
+              <div class="muted">Day Range</div>
+              <strong>$${eod.day_range}</strong>
+            </div>
+            <div style="background: #22242a; padding: 8px; border-radius: 8px;">
+              <div class="muted">ATR Multiple</div>
+              <strong>${eod.day_atr_multiple}×</strong>
+            </div>
+          </div>
+        </div>`;
     }).join('');
-    html += sec('5 — Trade Levels & Outcomes', tradeRows);
+    html += sec('5 — Trade Levels & Outcomes', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${tradeCards}</div>`);
   }
 
   el.innerHTML = html;
