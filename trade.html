@@ -17,6 +17,12 @@
     <a href="trade.html" class="nav-link active">Trade</a>
   </nav>
 
+  <!-- Disclaimer -->
+  <div style="background: #1c1a14; border: 1px solid #f59e0b; border-radius: 10px; padding: 10px 16px; margin-bottom: 12px;">
+    <span style="color: #f59e0b; font-weight: bold; margin-right: 8px;">⚠ Work in Progress</span>
+    <span class="muted" style="font-size: 0.85em;">This framework is experimental and under active development. Not financial advice — for research purposes only.</span>
+  </div>
+
   <!-- Header Section -->
   <div class="card">
     <div class="header-section">
@@ -35,7 +41,7 @@
   </div>
 
   <!-- Morning Setup panel -->
-  <div id="tab-morning" class="tab-panel">
+  <div id="tab-morning" class="tab-panel active">
 
     <!-- Step 1: Day Quality Gate -->
     <div class="card" id="step-1">
@@ -76,10 +82,18 @@
   </div>
 
   <!-- End of Day panel -->
-  <div id="tab-eod" class="tab-panel" style="display:none">
+  <div id="tab-eod" class="tab-panel">
     <div class="card">
       <h2>End of Day — Setup Outcomes</h2>
       <div id="eodContent">Loading…</div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top: 18px;">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+      <br><span style="color:#6b7280;">Not financial advice — for research and informational purposes only.</span>
     </div>
   </div>
 

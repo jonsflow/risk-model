@@ -630,9 +630,9 @@ function getDotsHTML(filled, total) {
 // =============================================================================
 
 function switchTradeTab(tab) {
-  document.querySelectorAll('#tab-morning, #tab-eod').forEach(p => p.style.display = 'none');
+  document.querySelectorAll('#tab-morning, #tab-eod').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.classList.remove('active'));
-  document.getElementById(`tab-${tab}`).style.display = 'block';
+  document.getElementById(`tab-${tab}`).classList.add('active');
   document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
 }
 

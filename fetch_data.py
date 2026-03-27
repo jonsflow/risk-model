@@ -195,7 +195,7 @@ def main():
     # Write timestamp file so browser knows when data was last updated
     timestamp_file = data_dir / 'last_updated.txt'
     with timestamp_file.open('w') as f:
-        f.write(datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC'))
+        f.write(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
 
     print(f"✓ Updated timestamp: {timestamp_file}", file=sys.stderr)
 
