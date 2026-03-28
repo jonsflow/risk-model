@@ -10,8 +10,9 @@ let allData = {};
 const TAB_DEFS = [
   { id: 'overview', label: 'Overview'    },
   { id: 'jpmorgan', label: 'JPMorgan'   },
-  { id: 'nyfed',    label: 'NY Fed'     },
-  { id: 'nfci',     label: 'Fed / NFCI' },
+  { id: 'nyfed',         label: 'NY Fed'        },
+  { id: 'policy-spread', label: 'Policy Spread' },
+  { id: 'nfci',          label: 'Fed / NFCI'    },
   { id: 'sahm',     label: 'Sahm Rule'  },
 ];
 
@@ -313,8 +314,9 @@ function renderTabContent(tabId) {
   switch (tabId) {
     case 'overview': renderOverviewTab(panel);  break;
     case 'jpmorgan': renderJPMorganTab(panel); break;
-    case 'nyfed':    renderNYFedTab(panel);    break;
-    case 'nfci':     renderNFCITab(panel);     break;
+    case 'nyfed':         renderNYFedTab(panel);         break;
+    case 'policy-spread': renderPolicySpreadTab(panel);  break;
+    case 'nfci':          renderNFCITab(panel);          break;
     case 'sahm':     renderSahmTab(panel);     break;
   }
 }
@@ -771,13 +773,13 @@ function probColor(prob) {
 }
 
 function renderNYFedTab(panel) {
-  const t10y2yPts  = allData['T10Y2Y'] || [];
-  const probSeries = t10y2yPts.map(p => ({
+  const t10y3mPts  = allData['T10Y3M'] || [];
+  const probSeries = t10y3mPts.map(p => ({
     date:  p.date,
     value: parseFloat(recessionProb(p.value).toFixed(2)),
   }));
 
-  const current     = t10y2yPts.length ? t10y2yPts[t10y2yPts.length - 1] : null;
+  const current     = t10y3mPts.length ? t10y3mPts[t10y3mPts.length - 1] : null;
   const currentProb = current ? recessionProb(current.value) : null;
 
   const statRow = document.createElement('div');
@@ -793,13 +795,13 @@ function renderNYFedTab(panel) {
         <div style="font-size:13px;color:${pc};margin-top:2px">${pl}</div>
       </div>
       <div class="card" style="flex:1;min-width:180px">
-        <div class="muted" style="font-size:12px;margin-bottom:4px">T10Y2Y Spread (proxy)</div>
+        <div class="muted" style="font-size:12px;margin-bottom:4px">T10Y3M Spread</div>
         <div style="font-size:36px;font-weight:700;color:#e9e9ea">${current.value.toFixed(2)}%</div>
         <div class="muted" style="font-size:12px;margin-top:2px">As of ${current.date}</div>
       </div>
     `;
   } else {
-    statRow.innerHTML = `<div class="card" style="flex:1"><div class="muted">T10Y2Y data unavailable</div></div>`;
+    statRow.innerHTML = `<div class="card" style="flex:1"><div class="muted">T10Y3M data unavailable — run fetch_fred.py to load</div></div>`;
   }
   panel.appendChild(statRow);
 
@@ -860,13 +862,6 @@ Spread    Probability   Signal
 −2.0%  →    67%        Very high
 −3.0%  →    85%        Extreme</div>
 
-      <p style="margin:0 0 10px 0"><strong style="color:#e9e9ea">Proxy note:</strong>
-        The official NY Fed model uses the <strong>10Y minus 3-month</strong> spread (T10Y3M, available on FRED).
-        This dashboard substitutes <strong>T10Y2Y</strong> because it is more widely traded, widely quoted by markets,
-        and available with a longer FRED history. Probabilities will differ from the official NY Fed publication —
-        treat this as directionally indicative, not a precise replication.
-      </p>
-
       <p style="margin:0 0 8px 0"><strong style="color:#e9e9ea">Historical track record:</strong>
         The model signaled elevated risk before every U.S. recession since the 1960s with no false positives through 2006.
         It crossed 30% in 2006 ahead of the 2007–09 GFC and briefly in early 2020 before the COVID recession.
@@ -876,8 +871,7 @@ Spread    Probability   Signal
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
         <a href="https://www.newyorkfed.org/research/capital_markets/ycfaq" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">NY Fed Yield Curve FAQ →</a>
         <a href="https://www.newyorkfed.org/research/recession_probability" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">NY Fed Recession Probability (official) →</a>
-        <a href="https://fred.stlouisfed.org/series/T10Y2Y" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">T10Y2Y on FRED →</a>
-        <a href="https://fred.stlouisfed.org/series/T10Y3M" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">T10Y3M on FRED (official input) →</a>
+        <a href="https://fred.stlouisfed.org/series/T10Y3M" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">T10Y3M on FRED →</a>
       </div>
     </div>
   `;
@@ -899,7 +893,114 @@ Spread    Probability   Signal
 }
 
 // =============================================================================
-// TAB 4: FED / NFCI
+// TAB 4: POLICY SPREAD (2Y − FEDFUNDS recession probability)
+// =============================================================================
+
+function renderPolicySpreadTab(panel) {
+  // Align DGS2 and FEDFUNDS by date to compute spread
+  const dgs2Pts     = allData['DGS2']     || [];
+  const fedFundsPts = allData['FEDFUNDS'] || [];
+
+  const fedMap = {};
+  for (const p of fedFundsPts) fedMap[p.date] = p.value;
+
+  // DGS2 is daily, FEDFUNDS is monthly — carry forward the last known FEDFUNDS value
+  let lastFF = null;
+  const spreadPts = [];
+  for (const p of dgs2Pts) {
+    if (fedMap[p.date] !== undefined) lastFF = fedMap[p.date];
+    if (lastFF !== null) spreadPts.push({ date: p.date, value: parseFloat((p.value - lastFF).toFixed(3)) });
+  }
+
+  const probSeries = spreadPts.map(p => ({
+    date:  p.date,
+    value: parseFloat(recessionProb(p.value).toFixed(2)),
+  }));
+
+  const current     = spreadPts.length ? spreadPts[spreadPts.length - 1] : null;
+  const currentProb = current ? recessionProb(current.value) : null;
+
+  const statRow = document.createElement('div');
+  statRow.style.cssText = 'display:flex;gap:14px;flex-wrap:wrap;margin-top:18px';
+
+  if (currentProb !== null) {
+    const pc = probColor(currentProb);
+    const pl = probLabel(currentProb);
+    statRow.innerHTML = `
+      <div class="card" style="flex:1;min-width:180px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Recession Probability</div>
+        <div style="font-size:36px;font-weight:700;color:${pc}">${currentProb.toFixed(1)}%</div>
+        <div style="font-size:13px;color:${pc};margin-top:2px">${pl}</div>
+      </div>
+      <div class="card" style="flex:1;min-width:180px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">2Y − Fed Funds Spread</div>
+        <div style="font-size:36px;font-weight:700;color:#e9e9ea">${current.value.toFixed(2)}%</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">As of ${current.date}</div>
+      </div>
+    `;
+  } else {
+    statRow.innerHTML = `<div class="card" style="flex:1"><div class="muted">DGS2 or FEDFUNDS data unavailable — run fetch_fred.py to load</div></div>`;
+  }
+  panel.appendChild(statRow);
+
+  const chartCard = document.createElement('div');
+  chartCard.className = 'card';
+  chartCard.style.marginTop = '14px';
+  chartCard.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e9e9ea;margin-bottom:12px">Recession Probability Over Time</div>
+    <div id="chart-policyspread" style="width:100%;height:250px"></div>
+  `;
+  panel.appendChild(chartCard);
+
+  const noteCard = document.createElement('div');
+  noteCard.className = 'card';
+  noteCard.style.marginTop = '14px';
+  noteCard.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e9e9ea;margin-bottom:10px">About This Model</div>
+    <div style="font-size:12px;color:#a7a7ad;line-height:1.7">
+      <p style="margin:0 0 10px 0">
+        This model applies the Estrella-Mishkin probit framework to the <strong style="color:#e9e9ea">2-year Treasury yield
+        minus the Effective Federal Funds Rate</strong> (DGS2 − FEDFUNDS). When the 2-year yield falls below the Fed Funds
+        rate, markets are pricing in rate cuts ahead — historically a signal that the Fed is behind the curve and
+        recession risk is rising.
+      </p>
+      <p style="margin:0 0 6px 0"><strong style="color:#e9e9ea">Formula (same probit structure as NY Fed model):</strong></p>
+      <div style="background:#0d0e11;border:1px solid #2a2b2f;border-radius:6px;padding:10px 14px;font-family:'SF Mono',Consolas,monospace;font-size:11px;color:#e9e9ea;margin:0 0 12px 0;line-height:1.8">
+P(recession | spread) = Φ(−0.5333 − 0.6330 × spread)
+
+spread = DGS2 − FEDFUNDS
+Negative spread = 2Y below Fed Funds = market pricing in cuts</div>
+      <p style="margin:0 0 10px 0">
+        Unlike the NY Fed model (which uses 10Y−3M as a leading indicator 12 months ahead), this spread is a more
+        direct measure of <strong style="color:#e9e9ea">current monetary policy tightness</strong> — how far the market
+        has already moved against the Fed. It tends to invert earlier in the cycle than 10Y−3M and re-steepens as
+        recession expectations peak.
+      </p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+        <a href="https://fred.stlouisfed.org/series/DGS2" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">DGS2 on FRED →</a>
+        <a href="https://fred.stlouisfed.org/series/FEDFUNDS" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">FEDFUNDS on FRED →</a>
+      </div>
+    </div>
+  `;
+  panel.appendChild(noteCard);
+
+  requestAnimationFrame(() => {
+    renderGovChart('chart-policyspread', probSeries, {
+      color:    '#ef4444',
+      height:   250,
+      refLines: [
+        { value: 30, color: '#f59e0b', label: 'Watch (30%)' },
+        { value: 50, color: '#ef4444', label: 'Elevated (50%)' },
+      ],
+      legend: currentProb !== null
+        ? [{ label: 'Rec. Prob.', color: probColor(currentProb), value: `${currentProb.toFixed(1)}%` }]
+        : [],
+    });
+  });
+}
+
+// =============================================================================
+// TAB 5: FED / NFCI
 // =============================================================================
 
 function renderNFCITab(panel) {
