@@ -52,7 +52,8 @@ def get_symbols_from_config(config):
     return symbols, ticker_map
 
 def get_symbols_from_macro_config(macro_config):
-    """Extract unique symbols and ticker mappings from macro_config.json categories."""
+    """Extract unique symbols and ticker mappings from macro_config.json categories
+    and regime_signals (extra symbols used only for regime scoring)."""
     seen = set()
     symbols = []
     ticker_map = {}
@@ -66,6 +67,14 @@ def get_symbols_from_macro_config(macro_config):
                 ticker = _SHARED_TICKER_MAP.get(symbol, symbol)
                 if ticker != symbol:
                     ticker_map[symbol] = ticker
+
+    for symbol in macro_config.get('regime_signals', []):
+        if symbol not in seen:
+            seen.add(symbol)
+            symbols.append(symbol)
+            ticker = _SHARED_TICKER_MAP.get(symbol, symbol)
+            if ticker != symbol:
+                ticker_map[symbol] = ticker
 
     return symbols, ticker_map
 
