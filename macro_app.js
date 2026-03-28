@@ -241,12 +241,44 @@ const FLAG_META = {
 };
 
 const FLAG_DESCRIPTIONS = {
-  carry_risk:       'HYG (high-yield credit) is below its MA. Credit markets are pricing in risk ahead of equities — historically a leading warning signal.',
-  inflation_regime: 'Inflation score ≥60%. Multiple signals firing simultaneously: TIPS bid, long bonds weak, commodities elevated. Expect pressure on real returns.',
-  credit_stress:    'Both HYG and LQD are below their MA. Investment-grade and high-yield credit selling off together — watch for spread widening and tighter financial conditions.',
-  china_divergence: 'FXI (China equities) is moving opposite to SPY. China is decoupling from the US cycle, which raises risk for global EM exposure and supply-chain sensitive sectors.',
-  vol_spike:        'UVXY or VIXY above their MA. Volatility products are being bid up — institutions are actively hedging, signaling elevated near-term risk-off sentiment.',
+  carry_risk:       'Yen strengthening with vol elevated — carry trades unwinding.',
+  inflation_regime: 'Inflation score ≥60% — TIPS bid, long bonds weak, commodities elevated.',
+  credit_stress:    'HYG and LQD both below their MA — spreads widening, financial conditions tightening.',
+  china_divergence: 'FXI moving opposite to SPY — China decoupling from the US cycle.',
+  vol_spike:        'Vol products above their MA — institutions actively hedging.',
 };
+
+// Assets to display for each flag: [symbol, displayLabel]
+// For inflation_regime we use rc.inflation.signals directly
+const FLAG_ASSETS = {
+  carry_risk:       [['USDJPY', 'USD/JPY'], ['UVXY', 'UVXY'], ['VIXY', 'VIXY']],
+  credit_stress:    [['HYG', 'HYG'], ['LQD', 'LQD']],
+  china_divergence: [['FXI', 'FXI'], ['SPY', 'SPY']],
+  vol_spike:        [['UVXY', 'UVXY'], ['VIXY', 'VIXY']],
+};
+
+function renderFlagChips(key, rc, signalMap) {
+  if (key === 'inflation_regime') {
+    const firing    = rc.inflation.signals.filter(s => s.firing === true);
+    const notFiring = rc.inflation.signals.filter(s => s.firing === false);
+    const rows = [];
+    if (firing.length)    rows.push(buildChipRow('above', '▲', firing.map(s => s.label)));
+    if (notFiring.length) rows.push(buildChipRow('below', '▼', notFiring.map(s => s.label)));
+    return rows.join('');
+  }
+  const assets = FLAG_ASSETS[key] || [];
+  const above = assets.filter(([sym]) => signalMap[sym] === true).map(([,lbl]) => lbl);
+  const below = assets.filter(([sym]) => signalMap[sym] === false).map(([,lbl]) => lbl);
+  const rows = [];
+  if (above.length) rows.push(buildChipRow('above', '▲', above));
+  if (below.length) rows.push(buildChipRow('below', '▼', below));
+  return rows.join('');
+}
+
+function buildChipRow(cls, triangle, labels) {
+  const chips = labels.map(l => `<span class="sym-chip ${cls}">${l}</span>`).join('');
+  return `<div class="overview-chips-row"><span class="overview-chips-dir ${cls}">${triangle}</span><div class="overview-chips">${chips}</div></div>`;
+}
 
 function buildRegimeMapSVG(rc) {
   const W = 180, H = 136;
@@ -283,6 +315,25 @@ function buildRegimeMapSVG(rc) {
   `;
 }
 
+function renderSignalChips(signals) {
+  if (!signals || !signals.length) return '';
+  return signals.map(s => {
+    const cls = s.firing === null ? 'neutral' : s.firing ? 'above' : 'below';
+    return `<span class="sym-chip ${cls}">${s.label}</span>`;
+  }).join('');
+}
+
+function renderAxisDetail(signals, upLabel, downLabel) {
+  const firing    = signals.filter(s => s.firing === true);
+  const notFiring = signals.filter(s => s.firing === false);
+  const rows = [];
+  if (firing.length)
+    rows.push(`<div class="regime-signal-row"><span class="regime-signal-dir up">↑ ${upLabel}</span><div class="regime-signal-chips">${renderSignalChips(firing)}</div></div>`);
+  if (notFiring.length)
+    rows.push(`<div class="regime-signal-row"><span class="regime-signal-dir down">↓ ${downLabel}</span><div class="regime-signal-chips">${renderSignalChips(notFiring)}</div></div>`);
+  return rows.join('');
+}
+
 function renderRegimeCard(rc) {
   const el = document.getElementById('regime-card');
   if (!el) return;
@@ -292,29 +343,35 @@ function renderRegimeCard(rc) {
     <div class="regime-quadrant">${rc.quadrant}</div>
     ${description ? `<div class="regime-description">${description}</div>` : ''}
     <div class="regime-axes">
-      <div class="regime-axis">
-        <span class="regime-axis-label">Growth</span>
-        <div class="regime-axis-track">
-          <div class="regime-axis-fill" style="width:${rc.growth.pct}%;background:#10b981"></div>
+      <div class="regime-axis-group">
+        <div class="regime-axis">
+          <span class="regime-axis-label">Growth</span>
+          <div class="regime-axis-track">
+            <div class="regime-axis-fill" style="width:${rc.growth.pct}%;background:#10b981"></div>
+          </div>
+          <span class="regime-axis-pct">${rc.growth.pct}%</span>
         </div>
-        <span class="regime-axis-pct">${rc.growth.pct}%</span>
-      </div>
-      <div class="regime-axis">
-        <span class="regime-axis-label">Inflation</span>
-        <div class="regime-axis-track">
-          <div class="regime-axis-fill" style="width:${rc.inflation.pct}%;background:#ef4444"></div>
+        <div class="regime-axis-detail">
+          ${renderAxisDetail(rc.growth.signals, 'Expansion', 'Contraction')}
         </div>
-        <span class="regime-axis-pct">${rc.inflation.pct}%</span>
       </div>
-    </div>
-    <div class="regime-method-note">
-      <strong>Growth</strong> — how many key risk assets (HYG, IWM, SPY, EEM, EMB, XLY vs XLP) are above their MA. High = broad expansion.<br><br>
-      <strong>Inflation</strong> — TIPS bid, long Treasuries weak, commodities (GLD, USO, DBC) above MA. High = inflation priced in.
+      <div class="regime-axis-group">
+        <div class="regime-axis">
+          <span class="regime-axis-label">Inflation</span>
+          <div class="regime-axis-track">
+            <div class="regime-axis-fill" style="width:${rc.inflation.pct}%;background:#ef4444"></div>
+          </div>
+          <span class="regime-axis-pct">${rc.inflation.pct}%</span>
+        </div>
+        <div class="regime-axis-detail">
+          ${renderAxisDetail(rc.inflation.signals, 'Inflationary', 'Deflationary')}
+        </div>
+      </div>
     </div>
   `;
 }
 
-function renderRegimeFlagsCard(rc) {
+function renderRegimeFlagsCard(rc, signalMap) {
   const el = document.getElementById('regime-flags-card');
   if (!el) return;
   const activeFlags = Object.entries(rc.flags)
@@ -323,8 +380,9 @@ function renderRegimeFlagsCard(rc) {
   const inner = activeFlags.length > 0
     ? activeFlags.map(f => `
         <div class="regime-flag-item">
-          <span class="regime-flag" style="background:${f.color}22;color:${f.color}">${f.label}</span>
+          <span class="regime-flag" style="background:${f.color}22;color:${f.color};border-left:3px solid ${f.color}">${f.label}</span>
           <span class="regime-flag-desc">${FLAG_DESCRIPTIONS[f.key] || ''}</span>
+          <div class="regime-flag-chips">${renderFlagChips(f.key, rc, signalMap)}</div>
         </div>`).join('')
     : '<div class="regime-no-flags">No active risk signals</div>';
   el.innerHTML = `
@@ -353,6 +411,7 @@ function buildTabUI(categories) {
   const container = document.getElementById('tab-container');
   const tabDefs = [
     { id: 'overview', label: 'Overview' },
+    { id: 'regime',   label: 'Regime' },
     ...categories.map(c => ({ id: c.id, label: c.name }))
   ];
 
@@ -439,25 +498,26 @@ const THEME_DESCRIPTIONS = {
 // OVERVIEW TAB
 // =============================================================================
 
+function renderRegimeTab(cache) {
+  const panel = document.getElementById('tab-regime');
+  if (!panel) return;
+  panel.innerHTML = `
+    <div class="regime-row">
+      <div class="overview-cat-card" id="regime-card"></div>
+      <div class="overview-cat-card" id="regime-flags-card"></div>
+      <div class="overview-cat-card" id="regime-chart-card"></div>
+    </div>
+  `;
+  if (cache.regime_card) {
+    renderRegimeCard(cache.regime_card);
+    renderRegimeFlagsCard(cache.regime_card, cache.signal_map || {});
+    renderRegimeChartCard(cache.regime_card);
+  }
+}
+
 function renderOverviewTab(cache) {
   const panel = document.getElementById('tab-overview');
   panel.innerHTML = '';
-
-  // Three regime cards in a row
-  const regimeRow = document.createElement('div');
-  regimeRow.className = 'regime-row';
-  regimeRow.innerHTML = `
-    <div class="overview-cat-card" id="regime-card"></div>
-    <div class="overview-cat-card" id="regime-flags-card"></div>
-    <div class="overview-cat-card" id="regime-chart-card"></div>
-  `;
-  panel.appendChild(regimeRow);
-
-  if (cache.regime_card) {
-    renderRegimeCard(cache.regime_card);
-    renderRegimeFlagsCard(cache.regime_card);
-    renderRegimeChartCard(cache.regime_card);
-  }
 
   // Category cards grid
   const grid = document.createElement('div');
@@ -613,6 +673,7 @@ function applyMacroCache(cache) {
   }
 
   renderOverviewTab(cache);
+  renderRegimeTab(cache);
 
   for (const catData of cache.categories) {
     const catConfig = MACRO_CATEGORIES.find(c => c.id === catData.id);

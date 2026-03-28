@@ -366,7 +366,7 @@ function applyDivergenceCache(cache) {
 }
 
 async function loadAndRender() {
-  const swing = SWING_WINDOW_DAYS !== null ? SWING_WINDOW_DAYS : Math.max(2, Math.floor(LOOKBACK_DAYS / 10));
+  const swing = SWING_WINDOW_DAYS !== null ? SWING_WINDOW_DAYS : Math.min(10, Math.max(2, Math.floor(LOOKBACK_DAYS / 10)));
   const r = await fetch(`./data/cache/divergence_${LOOKBACK_DAYS}_${PIVOT_MODE}_${swing}.json`, { cache: 'no-store' });
   if (!r.ok) throw new Error(`Cache missing — run: python3 generate_cache.py`);
   applyDivergenceCache(await r.json());

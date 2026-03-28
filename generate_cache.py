@@ -26,7 +26,7 @@ from cache_utils import (
 DATA_DIR = Path("data")
 CACHE_DIR = DATA_DIR / "cache"
 
-LOOKBACKS    = [20, 50, 100]
+LOOKBACKS    = [20, 50, 100, 200]
 MA_PERIODS   = [20, 50, 100]
 PIVOT_MODES  = ["recent", "highest", "highest-to-current"]
 SWINGS       = [2, 3, 5, 7, 10]
@@ -71,8 +71,10 @@ def classify_structure(points: list) -> tuple:
     # Seed from window opening price (first bar used as reference, not as pivot)
     running_high = points[0][1]
     running_low  = points[0][1]
-    last_high = None
-    last_low  = None
+    last_high  = None
+    last_low   = None
+    prior_high = None
+    prior_low  = None
     all_pivots = []
 
     for p in pivots:
@@ -80,29 +82,28 @@ def classify_structure(points: list) -> tuple:
             label = 'HH' if p['price'] > running_high else 'LH'
             if label == 'HH':
                 running_high = p['price']
-            last_high = {'time': p['time'], 'price': p['price'], 'label': label}
+            prior_high = last_high
+            last_high  = {'time': p['time'], 'price': p['price'], 'label': label}
         else:
             label = 'LL' if p['price'] < running_low else 'HL'
             if label == 'LL':
                 running_low = p['price']
-            last_low = {'time': p['time'], 'price': p['price'], 'label': label}
+            prior_low = last_low
+            last_low  = {'time': p['time'], 'price': p['price'], 'label': label}
         all_pivots.append({'time': p['time'], 'price': p['price'], 'label': label})
 
     hl = last_high['label'] if last_high else None
     ll = last_low['label']  if last_low  else None
 
-    # If current price has already broken below the last confirmed pivot low,
-    # treat it as an unconfirmed LL in progress (confirmation lag fix).
-    current_price = points[-1][1]
-    if last_low and current_price < last_low['price']:
-        ll = 'LL'
-
-    # Highs dominate direction: LH = bearish bias, HH = bullish bias.
-    # Mixed (LH+HL or HH+LL) lean in the direction of the highs.
     if   hl == 'HH' and ll == 'HL': trend_label = 'HH + HL \u2197'
     elif hl == 'LH' and ll == 'LL': trend_label = 'LL + LH \u2198'
-    elif hl == 'LH' and ll == 'HL': trend_label = 'LH + HL \u2198'  # lower highs dominate → bearish
-    elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL \u2197'  # higher highs dominate → bullish
+    elif hl == 'LH' and ll == 'HL':
+        ph = prior_high['label'] if prior_high else None
+        pl = prior_low['label']  if prior_low  else None
+        if   pl == 'LL': trend_label = 'LH + HL \u2198'  # HL is a bounce in a downtrend
+        elif ph == 'HH': trend_label = 'LH + HL \u2197'  # LH is a pullback in an uptrend
+        else:            trend_label = 'LH + HL \u2194'  # genuinely mixed
+    elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL \u2194'  # expanding range → sideways
     elif hl == 'HH':                trend_label = 'HH only \u2197'
     elif ll == 'LL':                trend_label = 'LL only \u2198'
     else:                           trend_label = 'Sideways \u2194'
@@ -157,7 +158,7 @@ def calculate_trend(pivots: list) -> str:
 
 
 def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> str:
-    up   = {'HH + HL \u2197', 'HH only \u2197', 'HH + LL \u2197'}
+    up   = {'HH + HL \u2197', 'HH only \u2197', 'LH + HL \u2197'}
     down = {'LL + LH \u2198', 'LL only \u2198', 'LH + HL \u2198'}
 
     if trend1 in up   and trend2 in down:
@@ -258,33 +259,58 @@ def derive_category_theme(cat_id: str, signals: dict) -> str:
 # REGIME CARD
 # =============================================================================
 
+def _score_pct(defs: list) -> tuple:
+    """
+    Normalize a list of (label, condition, weight) signal tuples.
+    condition=True  → fires; condition=False → doesn't fire; condition=None → data missing, excluded.
+    Returns (score, max, pct, signals) where pct = score / available_max * 100.
+    signals: list of {'label': str, 'firing': bool|None, 'weight': float}
+    """
+    signals_out = [{'label': label, 'firing': None if cond is None else bool(cond), 'weight': w}
+                   for label, cond, w in defs]
+    available = [(cond, w) for _, cond, w in defs if cond is not None]
+    total_w   = sum(w for _, w in available)
+    fire_w    = sum(w for c, w in available if c)
+    pct       = round(fire_w / total_w * 100) if total_w > 0 else 0
+    return round(fire_w, 2), round(total_w, 2), pct, signals_out
+
+
 def compute_regime_card(signal_map: dict) -> dict:
-    """Compute 4-quadrant Growth x Inflation regime classification from above-MA signals."""
+    """Compute 4-quadrant Growth x Inflation regime classification from above-MA signals.
 
-    growth_max    = 8.5
-    inflation_max = 6.5
+    Self-normalizing: pct = firing_weight / available_weight, so adding signals
+    does not distort the score — only the mix of what's available and firing matters.
+    """
+    g = signal_map.get
 
-    # Growth score: risk/growth assets above MA
-    growth_score = 0.0
-    if signal_map.get('HYG'):  growth_score += 2.0
-    if signal_map.get('IWM'):  growth_score += 1.5
-    if signal_map.get('SPY'):  growth_score += 1.0
-    if signal_map.get('EEM'):  growth_score += 1.0
-    if signal_map.get('EMB'):  growth_score += 1.0
-    # XLY>XLP: discretionary outperforming staples = growth signal
-    if signal_map.get('XLY') and not signal_map.get('XLP'):
-        growth_score += 1.0
+    # Derived conditions (None if data missing for either leg)
+    tlt = g('TLT')
+    tlt_below = (not tlt) if tlt is not None else None          # TLT below MA = inflation
 
-    # Inflation score
-    inflation_score = 0.0
-    if signal_map.get('TIP'):        inflation_score += 2.0
-    if not signal_map.get('TLT'):    inflation_score += 1.5  # TLT below MA = inflation
-    if signal_map.get('GLD'):        inflation_score += 1.0
-    if signal_map.get('USO'):        inflation_score += 1.0
-    if signal_map.get('DBC'):        inflation_score += 1.0
+    xly, xlp = g('XLY'), g('XLP')
+    disc_over_staples = (bool(xly) and not xlp) if (xly is not None and xlp is not None) else None
 
-    growth_pct    = round(growth_score    / growth_max    * 100)
-    inflation_pct = round(inflation_score / inflation_max * 100)
+    growth_defs = [
+        ('HYG',     g('HYG'),          2.0),   # credit / risk appetite
+        ('IWM',     g('IWM'),          1.5),   # small-cap domestic growth
+        ('SPY',     g('SPY'),          1.0),   # broad equity
+        ('EEM',     g('EEM'),          1.0),   # global growth
+        ('EMB',     g('EMB'),          1.0),   # EM credit
+        ('XLY>XLP', disc_over_staples, 1.0),   # XLY > XLP: consumers spending > defensives
+        ('USD/JPY', g('USDJPY'),       1.0),   # USD/JPY above MA: yen weak = carry trade on
+    ]
+
+    inflation_defs = [
+        ('TIP',    g('TIP'),         2.0),   # TIPS above MA: inflation expectations bid
+        ('TLT↓',   tlt_below,        1.5),   # TLT below MA: nominal bonds selling off
+        ('GLD',    g('GLD'),         1.0),   # gold above MA: hard asset / inflation hedge
+        ('USO',    g('USO'),         1.0),   # oil above MA: energy inflation
+        ('DBC',    g('DBC'),         1.0),   # broad commodities above MA
+        ('TIP/TLT', g('TIPS_SPREAD'), 1.5),  # TIP/TLT ratio above MA: breakeven widening
+    ]
+
+    growth_score, growth_max, growth_pct, growth_signals = _score_pct(growth_defs)
+    inflation_score, inflation_max, inflation_pct, inflation_signals = _score_pct(inflation_defs)
 
     # 4-quadrant classification (50% threshold on each axis)
     if   growth_pct >= 50 and inflation_pct <  50: quadrant = '\U0001f7e2 GOLDILOCKS'
@@ -294,7 +320,7 @@ def compute_regime_card(signal_map: dict) -> dict:
 
     # Risk-off warning flags
     flags = {
-        'carry_risk':       not signal_map.get('HYG', True),
+        'carry_risk':       not signal_map.get('USDJPY', True) and bool(signal_map.get('UVXY') or signal_map.get('VIXY')),
         'inflation_regime': inflation_pct >= 60,
         'credit_stress':    not signal_map.get('HYG', True) and not signal_map.get('LQD', True),
         'china_divergence': signal_map.get('FXI') != signal_map.get('SPY'),
@@ -303,8 +329,8 @@ def compute_regime_card(signal_map: dict) -> dict:
 
     return {
         'quadrant':  quadrant,
-        'growth':    {'score': round(growth_score, 2), 'max': growth_max,    'pct': growth_pct},
-        'inflation': {'score': round(inflation_score, 2), 'max': inflation_max, 'pct': inflation_pct},
+        'growth':    {'score': growth_score,    'max': growth_max,    'pct': growth_pct,    'signals': growth_signals},
+        'inflation': {'score': inflation_score, 'max': inflation_max, 'pct': inflation_pct, 'signals': inflation_signals},
         'flags':     flags,
     }
 
@@ -312,7 +338,7 @@ def compute_regime_card(signal_map: dict) -> dict:
 # MACRO CACHE GENERATION
 # =============================================================================
 
-def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period: int) -> dict:
+def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period: int, regime_signals: list = None) -> dict:
     generated = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     cache_categories = []
@@ -400,6 +426,27 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
             'assets':   cat_assets,
         })
 
+    # Regime-only signals: not displayed in UI but used for regime card scoring
+    for sym in (regime_signals or []):
+        pts = data.get(sym.lower(), [])
+        if len(pts) >= ma_period:
+            ma_pts = calculate_ma(pts, ma_period)
+            if ma_pts:
+                signal_map[sym] = pts[-1][1] > ma_pts[-1][1]
+
+    # TIPS spread: TIP/TLT ratio above its MA → breakeven inflation widening
+    tip_pts = data.get('tip', [])
+    tlt_pts = data.get('tlt', [])
+    if tip_pts and tlt_pts:
+        tip_dict = {p[0]: p[1] for p in tip_pts}
+        tlt_dict = {p[0]: p[1] for p in tlt_pts}
+        common_dates = sorted(set(tip_dict) & set(tlt_dict))
+        ratio_pts = [(d, tip_dict[d] / tlt_dict[d]) for d in common_dates if tlt_dict[d] != 0]
+        if len(ratio_pts) >= ma_period:
+            ratio_ma = calculate_ma(ratio_pts, ma_period)
+            if ratio_ma:
+                signal_map['TIPS_SPREAD'] = ratio_pts[-1][1] > ratio_ma[-1][1]
+
     pct = total_above / total_count if total_count > 0 else 0
     if   pct >= 0.70:  regime_label = '\U0001f7e2 STRONG RISK ON'
     elif pct >= 0.55:  regime_label = '\U0001f7e1 RISK ON'
@@ -418,6 +465,7 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
             'pct':   round(pct * 100),
         },
         'regime_card': compute_regime_card(signal_map),
+        'signal_map':  {k: bool(v) for k, v in signal_map.items() if v is not None},
         'categories':  cache_categories,
     }
 
@@ -529,9 +577,10 @@ def main():
     global THRESHOLDS
     THRESHOLDS.update(config.get('thresholds', {}))
 
-    pairs      = config['pairs']
-    symbols    = config['symbols']
-    categories = macro_config['macro_categories']
+    pairs           = config['pairs']
+    symbols         = config['symbols']
+    categories      = macro_config['macro_categories']
+    regime_signals  = macro_config.get('regime_signals', [])
 
     # Collect all unique symbols from both configs
     all_syms = set()
@@ -540,6 +589,8 @@ def main():
     for cat in categories:
         for a in cat['assets']:
             all_syms.add(a['symbol'].lower())
+    for sym in regime_signals:
+        all_syms.add(sym.lower())
 
     print(f"Loading {len(all_syms)} symbols...")
     data = {}
@@ -561,7 +612,7 @@ def main():
     macro_count = 0
     for lookback in LOOKBACKS:
         for ma_period in MA_PERIODS:
-            cache = generate_macro_cache(categories, data, lookback, ma_period)
+            cache = generate_macro_cache(categories, data, lookback, ma_period, regime_signals)
             path  = CACHE_DIR / f"macro_{lookback}_{ma_period}.json"
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(cache, f, ensure_ascii=False, separators=(',', ':'))

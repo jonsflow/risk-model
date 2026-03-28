@@ -366,7 +366,6 @@ code {
   letter-spacing: 0.07em;
   margin-bottom: 10px;
 }
-.regime-flag-list { display: flex; flex-direction: column; gap: 10px; }
 .regime-no-flags  { font-size: 11px; color: #a7a7ad; }
 .regime-quadrant {
   font-size: 13px;
@@ -383,9 +382,11 @@ code {
 .regime-axes {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 14px;
   margin-bottom: 10px;
 }
+.regime-axis-group { display: flex; flex-direction: column; gap: 6px; }
+.regime-axis-detail { padding-left: 64px; }
 .regime-axis {
   display: flex;
   align-items: center;
@@ -403,10 +404,12 @@ code {
 }
 .regime-axis-fill  { height: 100%; border-radius: 3px; transition: width 0.4s ease; }
 .regime-axis-pct   { width: 28px; text-align: right; flex-shrink: 0; font-weight: 600; color: #e9e9ea; font-size: 11px; }
-.regime-flag-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.regime-flag-item { display: flex; flex-direction: column; gap: 3px; }
-.regime-flag      { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; align-self: flex-start; }
-.regime-flag-desc { font-size: 10px; color: #6a6a74; line-height: 1.45; }
+.regime-flag-list  { display: flex; flex-direction: column; gap: 0; margin-top: 10px; }
+.regime-flag-item  { display: flex; flex-direction: column; gap: 5px; padding: 10px 0; border-top: 1px solid #2a2b2f; }
+.regime-flag-item:first-child { border-top: none; padding-top: 0; }
+.regime-flag-chips { display: flex; flex-direction: column; gap: 4px; }
+.regime-flag       { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px; display: inline-block; white-space: nowrap; align-self: flex-start; letter-spacing: 0.04em; }
+.regime-flag-desc  { font-size: 11px; color: #a7a7ad; line-height: 1.5; }
 .regime-method-note {
   flex: 1;
   font-size: 11px;
@@ -464,6 +467,12 @@ code {
 .sym-chip { font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.02em; display: inline-flex; align-items: center; gap: 4px; }
 .sym-chip.above { background: rgba(16,185,129,0.15); color: #10b981; }
 .sym-chip.below { background: rgba(239,68,68,0.15);  color: #ef4444; }
+.sym-chip.neutral { background: rgba(255,255,255,0.08); color: #6b7280; }
+.regime-signal-row   { display: flex; align-items: flex-start; gap: 8px; margin-top: 5px; }
+.regime-signal-dir   { font-size: 11px; font-weight: 600; white-space: nowrap; flex-shrink: 0; padding-top: 2px; min-width: 95px; }
+.regime-signal-dir.up   { color: #10b981; }
+.regime-signal-dir.down { color: #ef4444; }
+.regime-signal-chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .sym-chip-none  { font-size: 12px; color: #3a3a42; }
 .overview-cat-footer { margin-top: 14px; }
