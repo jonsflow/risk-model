@@ -27,7 +27,7 @@ function fmt(x) {
 // =============================================================================
 
 async function loadConfig() {
-  const r = await fetch('./config.json', { cache: "no-store" });
+  const r = await fetch('./config.json', { cache: 'no-cache' });
   if (!r.ok) throw new Error(`Failed to load config.json: ${r.status}`);
   const config = await r.json();
 
@@ -48,8 +48,9 @@ async function loadConfig() {
 // DATA LOADING
 // =============================================================================
 
-async function loadCsvPoints(path) {
-  const r = await fetch(path, { cache: "no-store" });
+async function loadCsvPoints(path, cacheMode = 'default') {
+  const fetchOpts = cacheMode === 'default' ? {} : { cache: cacheMode };
+  const r = await fetch(path, fetchOpts);
   if (!r.ok) throw new Error(`Fetch failed ${r.status} for ${path}`);
   const text = await r.text();
   const lines = text.trim().split(/\r?\n/);
@@ -255,6 +256,8 @@ function generatePairHTML(pair) {
       </div>
       <div class="divergence-signal" id="${id}-signal"></div>
 
+      <div class="pair-scores" id="${id}-pair-scores"></div>
+
       <div class="chart-container">
         <div class="chart-title">${symbol1} Price</div>
         <div id="chart-${id}-${s1}" style="width:100%;height:150px"></div>
@@ -280,35 +283,19 @@ function renderPairColumns() {
 
 function applyDivergenceCache(cache) {
   // MA-based risk score (from cache)
-  const riskScore      = cache.risk_score;
-  const scoreElement   = document.getElementById("risk-score");
-  const detailsElement = document.getElementById("risk-details");
+  const riskScore    = cache.risk_score;
+  const scoreElement = document.getElementById("risk-score");
 
   if (scoreElement) {
     scoreElement.textContent = `${riskScore.signal} (${riskScore.score > 0 ? '+' : ''}${riskScore.score})`;
   }
-  if (detailsElement) {
-    detailsElement.innerHTML = riskScore.details.map(d => {
-      const above = d.includes('\u2713');
-      return `<span style="padding:3px 8px;border-radius:4px;background:${above ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'};color:${above ? '#4ade80' : '#f87171'}">${d}</span>`;
-    }).join('');
-  }
 
   // Trend-structure risk score (computed from pair trend labels)
-  const trendScoreElement   = document.getElementById("trend-risk-score");
-  const trendDetailsElement = document.getElementById("trend-risk-details");
+  const trendScoreElement = document.getElementById("trend-risk-score");
 
   let total = 0;
-  const pairChips = [];
   for (const pairData of cache.pairs) {
-    const s = scorePair(pairData.trend1, pairData.trend2);
-    total += s;
-    const sign = s > 0 ? '+' : '';
-    const chipColor = s > 0 ? 'rgba(16,185,129,0.15)' : s < 0 ? 'rgba(239,68,68,0.15)' : 'rgba(167,167,173,0.15)';
-    const textColor = s > 0 ? '#10b981' : s < 0 ? '#ef4444' : '#a7a7ad';
-    const pair = PAIRS.find(p => p.id === pairData.id);
-    const pairLabel = pair ? `${pair.symbol1}↔${pair.symbol2}` : pairData.id;
-    pairChips.push(`<span style="padding:3px 8px;border-radius:4px;background:${chipColor};color:${textColor}">${pairLabel}: ${trendArrow(pairData.trend1)} vs ${trendArrow(pairData.trend2)} (${sign}${s})</span>`);
+    total += scorePair(pairData.trend1, pairData.trend2);
   }
   const maxTotal = cache.pairs.length * 2;
   const { label, color } = trendSignalLabel(total, maxTotal);
@@ -316,20 +303,6 @@ function applyDivergenceCache(cache) {
   if (trendScoreElement) {
     trendScoreElement.textContent = `${label} (${total > 0 ? '+' : ''}${total})`;
     trendScoreElement.style.color = color;
-  }
-  if (trendDetailsElement) {
-    trendDetailsElement.innerHTML = pairChips.join('');
-  }
-
-  // Combined score: MA + trend structure, normalized against combined max
-  const combinedElement = document.getElementById("combined-risk-score");
-  if (combinedElement) {
-    const maMax = riskScore.details.length;
-    const combinedScore = riskScore.score + total;
-    const combinedMax = maMax + maxTotal;
-    const combined = trendSignalLabel(combinedScore, combinedMax);
-    combinedElement.textContent = `${combined.label} (${combinedScore > 0 ? '+' : ''}${combinedScore})`;
-    combinedElement.style.color = combined.color;
   }
 
   // Per-pair: signals + chart render with cached pivots
@@ -347,6 +320,24 @@ function applyDivergenceCache(cache) {
 
     const elSignal = document.getElementById(`${pairData.id}-signal`);
     if (elSignal) elSignal.textContent = pairData.signal;
+
+    // Per-pair score chips: MA status for each symbol + trend direction score
+    const pairScoresEl = document.getElementById(`${pairData.id}-pair-scores`);
+    if (pairScoresEl) {
+      const score = scorePair(pairData.trend1, pairData.trend2);
+      const sign = score > 0 ? '+' : '';
+      const detail1 = riskScore.details.find(d => d.startsWith(pair.symbol1 + ':')) || '';
+      const detail2 = riskScore.details.find(d => d.startsWith(pair.symbol2 + ':')) || '';
+      const above1 = detail1.includes('\u2713');
+      const above2 = detail2.includes('\u2713');
+      const chipColor = score > 0 ? 'rgba(16,185,129,0.15)' : score < 0 ? 'rgba(239,68,68,0.15)' : 'rgba(167,167,173,0.15)';
+      const chipText  = score > 0 ? '#10b981' : score < 0 ? '#ef4444' : '#a7a7ad';
+      pairScoresEl.innerHTML = [
+        `<span style="padding:3px 8px;border-radius:4px;background:${above1 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'};color:${above1 ? '#4ade80' : '#f87171'}">${detail1 || pair.symbol1}</span>`,
+        `<span style="padding:3px 8px;border-radius:4px;background:${above2 ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)'};color:${above2 ? '#4ade80' : '#f87171'}">${detail2 || pair.symbol2}</span>`,
+        `<span style="padding:3px 8px;border-radius:4px;background:${chipColor};color:${chipText}">${trendArrow(pairData.trend1)} vs ${trendArrow(pairData.trend2)} (${sign}${score})</span>`,
+      ].join('');
+    }
 
     // Charts use CSV data from dataCache; pivots come from cache
     const pts1 = dataCache[s1];
@@ -380,22 +371,38 @@ async function loadAndRender() {
   try {
     await loadConfig();
 
-    // Load all CSVs — still needed for TradingView chart rendering
-    for (const sym of SYMBOLS) {
+    // Check last_updated.txt to detect whether data changed since last visit
+    let csvCacheMode = 'default';
+    try {
+      const r = await fetch('./data/last_updated.txt', { cache: 'no-store' });
+      if (r.ok) {
+        const rawVersion = (await r.text()).trim();
+        const storedVersion = localStorage.getItem('risk_data_version') || '';
+        if (rawVersion !== storedVersion) {
+          // Data is newer than what the browser has cached — force revalidation
+          csvCacheMode = 'no-cache';
+          localStorage.setItem('risk_data_version', rawVersion);
+          console.log('New data detected, bypassing CSV cache');
+        }
+        const d = new Date(rawVersion.replace(' UTC', 'Z').replace(' ', 'T'));
+        document.getElementById("meta").textContent = `Last updated: ${d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`;
+      }
+    } catch (err) {
+      console.warn('Could not load last_updated.txt:', err.message);
+      document.getElementById("meta").textContent = 'Last updated: unknown';
+    }
+
+    // Load all daily CSVs in parallel — needed for TradingView chart rendering
+    await Promise.all(SYMBOLS.map(async (sym) => {
       try {
-        dataCache[sym] = await loadCsvPoints(`./data/${sym}.csv`);
-        dataCache[`${sym}_hourly`] = await loadHourlyData(`./data/${sym}_hourly.csv`);
+        dataCache[sym] = await loadCsvPoints(`./data/${sym}.csv`, csvCacheMode);
       } catch (err) {
         console.warn(`Could not load ${sym}:`, err.message);
         dataCache[sym] = [];
-        dataCache[`${sym}_hourly`] = [];
       }
-    }
+    }));
 
     renderPairColumns();
-
-    const lastUpdated = await ChartUtils.loadLastUpdated();
-    document.getElementById("meta").textContent = `Last updated: ${lastUpdated}`;
 
     await loadAndRender();
 
