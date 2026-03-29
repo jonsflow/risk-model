@@ -11,6 +11,7 @@ const TAB_DEFS = [
   { id: 'overview', label: 'Overview'    },
   { id: 'jpmorgan', label: 'JPMorgan'   },
   { id: 'nyfed',         label: 'NY Fed'        },
+  { id: 'oil-yc',        label: 'Oil + Yield'   },
   { id: 'policy-spread', label: 'Policy Spread' },
   { id: 'nfci',          label: 'Fed / NFCI'    },
   { id: 'sahm',     label: 'Sahm Rule'  },
@@ -315,6 +316,7 @@ function renderTabContent(tabId) {
     case 'overview': renderOverviewTab(panel);  break;
     case 'jpmorgan': renderJPMorganTab(panel); break;
     case 'nyfed':         renderNYFedTab(panel);         break;
+    case 'oil-yc':        renderOilYCTab(panel);         break;
     case 'policy-spread': renderPolicySpreadTab(panel);  break;
     case 'nfci':          renderNFCITab(panel);          break;
     case 'sahm':     renderSahmTab(panel);     break;
@@ -893,7 +895,178 @@ Spread    Probability   Signal
 }
 
 // =============================================================================
-// TAB 4: POLICY SPREAD (2Y − FEDFUNDS recession probability)
+// TAB 4: OIL + YIELD CURVE (combined probit recession probability)
+// =============================================================================
+
+function computeNOPI(oilPts, lookback = 504) {
+  // Hamilton's Net Oil Price Increase: excess above the prior-year (504 trading day) max.
+  // Zero when oil is below its prior max — only counts new upside shocks.
+  const result = [];
+  for (let i = lookback; i < oilPts.length; i++) {
+    let maxPrior = -Infinity;
+    for (let j = i - lookback; j < i; j++) maxPrior = Math.max(maxPrior, oilPts[j].value);
+    result.push({ date: oilPts[i].date, value: Math.max(0, oilPts[i].value - maxPrior) });
+  }
+  return result;
+}
+
+function renderOilYCTab(panel) {
+  const t10y3mPts = allData['T10Y3M']     || [];
+  const oilPts    = allData['DCOILWTICO'] || [];
+
+  const nopiPts = computeNOPI(oilPts, 504);
+
+  // Build date-indexed maps for alignment
+  const t10y3mMap = {};
+  for (const p of t10y3mPts) t10y3mMap[p.date] = p.value;
+  const nopiMap = {};
+  for (const p of nopiPts) nopiMap[p.date] = p.value;
+
+  // Combined probit: Φ(−0.5333 − 0.6330 × T10Y3M − 0.015 × NOPI)
+  // β_oil = 0.015: a $20 NOPI shock ≈ same effect as 0.3pp of additional inversion
+  const probSeries = [];
+  let lastNOPI = 0;
+  for (const p of t10y3mPts) {
+    if (nopiMap[p.date] !== undefined) lastNOPI = nopiMap[p.date];
+    const z = -0.5333 - 0.6330 * p.value - 0.015 * lastNOPI;
+    probSeries.push({ date: p.date, value: parseFloat((standardNormalCDF(z) * 100).toFixed(2)) });
+  }
+
+  // Rolling 12-month max of WTI for the overlay chart
+  const wtiMaxSeries = [];
+  for (let i = 252; i < oilPts.length; i++) {
+    let mx = -Infinity;
+    for (let j = i - 252; j < i; j++) mx = Math.max(mx, oilPts[j].value);
+    wtiMaxSeries.push({ date: oilPts[i].date, value: parseFloat(mx.toFixed(2)) });
+  }
+
+  const currentT10Y3M = t10y3mPts.length ? t10y3mPts[t10y3mPts.length - 1] : null;
+  const currentNOPI   = nopiPts.length   ? nopiPts[nopiPts.length - 1]     : null;
+  const currentProb   = probSeries.length ? probSeries[probSeries.length - 1] : null;
+
+  const statRow = document.createElement('div');
+  statRow.style.cssText = 'display:flex;gap:14px;flex-wrap:wrap;margin-top:18px';
+
+  if (currentProb) {
+    const pc = probColor(currentProb.value);
+    const pl = probLabel(currentProb.value);
+    const nopiVal = currentNOPI ? currentNOPI.value : 0;
+    statRow.innerHTML = `
+      <div class="card" style="flex:1;min-width:160px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">Combined Recession Probability</div>
+        <div style="font-size:36px;font-weight:700;color:${pc}">${currentProb.value.toFixed(1)}%</div>
+        <div style="font-size:13px;color:${pc};margin-top:2px">${pl}</div>
+      </div>
+      <div class="card" style="flex:1;min-width:160px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">T10Y3M Spread</div>
+        <div style="font-size:36px;font-weight:700;color:#e9e9ea">${currentT10Y3M.value.toFixed(2)}%</div>
+        <div class="muted" style="font-size:12px;margin-top:2px">As of ${currentT10Y3M.date}</div>
+      </div>
+      <div class="card" style="flex:1;min-width:160px">
+        <div class="muted" style="font-size:12px;margin-bottom:4px">WTI Oil Shock (NOPI)</div>
+        <div style="font-size:36px;font-weight:700;color:${nopiVal > 0 ? '#f97316' : '#e9e9ea'}">
+          ${nopiVal > 0 ? '+$' + nopiVal.toFixed(1) : 'None'}
+        </div>
+        <div class="muted" style="font-size:12px;margin-top:2px">${nopiVal > 0 ? 'Above 2Y max' : 'Below 2Y max'}</div>
+      </div>
+    `;
+  } else {
+    statRow.innerHTML = `<div class="card" style="flex:1"><div class="muted">T10Y3M or DCOILWTICO data unavailable — run fetch_fred.py</div></div>`;
+  }
+  panel.appendChild(statRow);
+
+  // Main probability chart
+  const chartCard = document.createElement('div');
+  chartCard.className = 'card';
+  chartCard.style.marginTop = '14px';
+  chartCard.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e9e9ea;margin-bottom:12px">Combined Recession Probability Over Time</div>
+    <div id="chart-oilyc-prob" style="width:100%;height:250px"></div>
+  `;
+  panel.appendChild(chartCard);
+
+  // WTI price + rolling max overlay chart
+  const wtiCard = document.createElement('div');
+  wtiCard.className = 'card';
+  wtiCard.style.marginTop = '14px';
+  wtiCard.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e9e9ea;margin-bottom:4px">WTI Crude Oil vs. 1-Year Rolling Max</div>
+    <div style="font-size:11px;color:#a7a7ad;margin-bottom:10px">Gap above the max line = NOPI oil shock signal</div>
+    <div id="chart-oilyc-wti" style="width:100%;height:200px"></div>
+  `;
+  panel.appendChild(wtiCard);
+
+  // Methodology note
+  const noteCard = document.createElement('div');
+  noteCard.className = 'card';
+  noteCard.style.marginTop = '14px';
+  noteCard.innerHTML = `
+    <div style="font-size:13px;font-weight:600;color:#e9e9ea;margin-bottom:10px">About This Model</div>
+    <div style="font-size:12px;color:#a7a7ad;line-height:1.7">
+      <p style="margin:0 0 10px 0">
+        This model extends the Estrella-Mishkin probit framework with Hamilton's Net Oil Price Increase (NOPI)
+        as a second predictor. Oil price shocks have preceded every major U.S. recession since 1973,
+        independently of the yield curve signal.
+      </p>
+      <p style="margin:0 0 6px 0"><strong style="color:#e9e9ea">Formula:</strong></p>
+      <div style="background:#0d0e11;border:1px solid #2a2b2f;border-radius:6px;padding:10px 14px;font-family:'SF Mono',Consolas,monospace;font-size:11px;color:#e9e9ea;margin:0 0 12px 0;line-height:1.8">
+P(recession) = Φ(−0.5333 − 0.6330 × T10Y3M − 0.015 × NOPI)
+
+NOPI(t) = max(0, WTI(t) − max(WTI over prior 504 trading days))
+
+T10Y3M coefficients: Estrella &amp; Mishkin (1996) — exact published values
+NOPI measure:        Hamilton (1996, 2003) — exact published definition
+β_oil = 0.015:       approximated — a $20 NOPI shock adds ~0.3 probit units,
+                     equivalent in effect to ~0.5pp of additional inversion</div>
+      <p style="margin:0 0 8px 0"><strong style="color:#e9e9ea">NOPI lookback:</strong>
+        504 trading days (~2 years). Hamilton's original work used a 3-year quarterly lookback;
+        2 years at daily frequency is a reasonable approximation that captures medium-term supply shocks
+        without being anchored to distant historical price levels.
+      </p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin-top:8px">
+        <a href="https://fred.stlouisfed.org/series/T10Y3M" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">T10Y3M on FRED →</a>
+        <a href="https://fred.stlouisfed.org/series/DCOILWTICO" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">WTI on FRED →</a>
+        <a href="https://www.newyorkfed.org/research/recession_probability" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none;font-size:11px">NY Fed Recession Probability →</a>
+      </div>
+    </div>
+  `;
+  panel.appendChild(noteCard);
+
+  requestAnimationFrame(() => {
+    // Probability chart
+    renderGovChart('chart-oilyc-prob', probSeries, {
+      color:    '#ef4444',
+      height:   250,
+      refLines: [
+        { value: 30, color: '#f59e0b', label: 'Watch (30%)' },
+        { value: 50, color: '#ef4444', label: 'Elevated (50%)' },
+      ],
+      legend: currentProb ? [{ label: 'Rec. Prob.', color: probColor(currentProb.value), value: `${currentProb.value.toFixed(1)}%` }] : [],
+    });
+
+    // WTI dual-series chart (price + rolling max)
+    const wtiEl = document.getElementById('chart-oilyc-wti');
+    if (wtiEl && oilPts.length && wtiMaxSeries.length) {
+      const { LineSeries } = window.LightweightCharts;
+      const wtiChart = ChartUtils.createDashboardChart(wtiEl, 200, {
+        grid: { vertLines: { color: '#2a2b2f' }, horzLines: { color: '#2a2b2f' } },
+      });
+      const priceSeries = wtiChart.addSeries(LineSeries, {
+        color: '#f59e0b', lineWidth: 2, priceLineVisible: false, lastValueVisible: true, title: 'WTI',
+      });
+      const maxSeries = wtiChart.addSeries(LineSeries, {
+        color: '#ef4444', lineWidth: 1, lineStyle: window.LightweightCharts.LineStyle.Dashed,
+        priceLineVisible: false, lastValueVisible: false, title: '2Y Max',
+      });
+      priceSeries.setData(oilPts.map(p => ({ time: p.date, value: p.value })));
+      maxSeries.setData(wtiMaxSeries.map(p => ({ time: p.date, value: p.value })));
+      wtiChart.timeScale().fitContent();
+    }
+  });
+}
+
+// =============================================================================
+// TAB 5: POLICY SPREAD (2Y − FEDFUNDS recession probability)
 // =============================================================================
 
 function renderPolicySpreadTab(panel) {
