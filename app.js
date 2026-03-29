@@ -27,7 +27,7 @@ function fmt(x) {
 // =============================================================================
 
 async function loadConfig() {
-  const r = await fetch('./config.json', { cache: "no-store" });
+  const r = await fetch('./config.json', { cache: 'no-cache' });
   if (!r.ok) throw new Error(`Failed to load config.json: ${r.status}`);
   const config = await r.json();
 
@@ -48,8 +48,9 @@ async function loadConfig() {
 // DATA LOADING
 // =============================================================================
 
-async function loadCsvPoints(path) {
-  const r = await fetch(path, { cache: "no-store" });
+async function loadCsvPoints(path, cacheMode = 'default') {
+  const fetchOpts = cacheMode === 'default' ? {} : { cache: cacheMode };
+  const r = await fetch(path, fetchOpts);
   if (!r.ok) throw new Error(`Fetch failed ${r.status} for ${path}`);
   const text = await r.text();
   const lines = text.trim().split(/\r?\n/);
@@ -380,22 +381,38 @@ async function loadAndRender() {
   try {
     await loadConfig();
 
-    // Load all CSVs — still needed for TradingView chart rendering
-    for (const sym of SYMBOLS) {
+    // Check last_updated.txt to detect whether data changed since last visit
+    let csvCacheMode = 'default';
+    try {
+      const r = await fetch('./data/last_updated.txt', { cache: 'no-store' });
+      if (r.ok) {
+        const rawVersion = (await r.text()).trim();
+        const storedVersion = localStorage.getItem('risk_data_version') || '';
+        if (rawVersion !== storedVersion) {
+          // Data is newer than what the browser has cached — force revalidation
+          csvCacheMode = 'no-cache';
+          localStorage.setItem('risk_data_version', rawVersion);
+          console.log('New data detected, bypassing CSV cache');
+        }
+        const d = new Date(rawVersion.replace(' UTC', 'Z').replace(' ', 'T'));
+        document.getElementById("meta").textContent = `Last updated: ${d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`;
+      }
+    } catch (err) {
+      console.warn('Could not load last_updated.txt:', err.message);
+      document.getElementById("meta").textContent = 'Last updated: unknown';
+    }
+
+    // Load all daily CSVs in parallel — needed for TradingView chart rendering
+    await Promise.all(SYMBOLS.map(async (sym) => {
       try {
-        dataCache[sym] = await loadCsvPoints(`./data/${sym}.csv`);
-        dataCache[`${sym}_hourly`] = await loadHourlyData(`./data/${sym}_hourly.csv`);
+        dataCache[sym] = await loadCsvPoints(`./data/${sym}.csv`, csvCacheMode);
       } catch (err) {
         console.warn(`Could not load ${sym}:`, err.message);
         dataCache[sym] = [];
-        dataCache[`${sym}_hourly`] = [];
       }
-    }
+    }));
 
     renderPairColumns();
-
-    const lastUpdated = await ChartUtils.loadLastUpdated();
-    document.getElementById("meta").textContent = `Last updated: ${lastUpdated}`;
 
     await loadAndRender();
 
