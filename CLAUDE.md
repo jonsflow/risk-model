@@ -109,6 +109,12 @@ Each series has three fields beyond `id` and `name`:
 
 Configurable via dropdowns: lookback (20/50/100d), pivot mode (recent/highest/highest-to-current), swing window (auto or manual). Each combination = one cache file.
 
+## Commit Rules
+
+- **Do not commit data files locally**: `data/*.csv`, `data/cache/*.json`, `data/fred/*.csv` are committed exclusively by the GitHub Actions workflow — do not stage or commit them from a dev environment.
+- **Only commit source files**: HTML, JS, Python, JSON configs, CSS, and workflow YAML.
+- The daily workflow at 21:00 UTC handles all data fetching, cache regeneration, and data commits automatically.
+
 ## Common Gotchas
 
 1. **CORS errors**: Use `python3 -m http.server 8000`, not `file://`
