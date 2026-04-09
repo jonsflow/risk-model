@@ -83,6 +83,37 @@ All series defined in `fred_config.json`. The `display` field controls the card 
 
 **NFCI**: National Financial Conditions Index. Values below zero = looser than average; above zero = tighter. A key leading indicator of financial stress.
 
+### FOMC & Policy Rates (daily / weekly / monthly)
+
+| ID | Name | Units | Freq | Display |
+|----|------|-------|------|---------|
+| DFEDTARU | Fed Funds Target — Upper | % | daily | level |
+| DFEDTARL | Fed Funds Target — Lower | % | daily | level |
+| EFFR | Effective Fed Funds Rate | % | daily | level |
+| IORB | Interest on Reserve Balances | % | daily | level |
+| SOFR | SOFR (Overnight) | % | daily | level |
+| SOFR30DAYAVG | 30-Day Avg SOFR | % | daily | level |
+| WALCL | Fed Balance Sheet | $B | weekly | level |
+| FEDTARMD | SEP Median Rate Projection | % | monthly | level |
+| RRPONTSYD | Overnight Reverse Repo | $B | daily | level |
+| WRESBAL | Reserve Balances | $B | weekly | level |
+| TREAST | Treasuries Held by Fed | $M | weekly | level |
+| MBST | MBS Held by Fed | $M | weekly | level |
+
+**Fed Funds Target** (DFEDTARU / DFEDTARL): The FOMC's upper and lower bounds for the federal funds rate target range. Changes only at FOMC meetings (8 per year).
+
+**EFFR**: The actual rate at which banks lend reserves overnight — should trade within the target range. Deviations signal liquidity stress.
+
+**SOFR**: Secured Overnight Financing Rate, the benchmark that replaced LIBOR. Reflects the cost of borrowing cash overnight collateralized by Treasuries.
+
+**Fed Balance Sheet** (WALCL): Total assets held by Federal Reserve banks. Expansion = QE (quantitative easing); contraction = QT (quantitative tightening).
+
+**Overnight Reverse Repo** (RRPONTSYD): Cash parked at the Fed overnight by money market funds. High levels indicate excess liquidity; rapid drawdown can signal tightening financial conditions.
+
+**Reserve Balances** (WRESBAL): Bank reserves held at the Fed. A key measure of banking system liquidity.
+
+**Treasuries / MBS Held** (TREAST / MBST): Breakdown of the Fed's securities portfolio — tracks the composition of QE/QT.
+
 ## Adding New Series
 
 1. Add entry to `fred_config.json` under the appropriate category
