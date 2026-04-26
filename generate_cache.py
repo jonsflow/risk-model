@@ -98,11 +98,7 @@ def classify_structure(points: list) -> tuple:
     if   hl == 'HH' and ll == 'HL': trend_label = 'HH + HL \u2197'
     elif hl == 'LH' and ll == 'LL': trend_label = 'LL + LH \u2198'
     elif hl == 'LH' and ll == 'HL':
-        ph = prior_high['label'] if prior_high else None
-        pl = prior_low['label']  if prior_low  else None
-        if   pl == 'LL': trend_label = 'LH + HL \u2198'  # HL is a bounce in a downtrend
-        elif ph == 'HH': trend_label = 'LH + HL \u2197'  # LH is a pullback in an uptrend
-        else:            trend_label = 'LH + HL \u2194'  # genuinely mixed
+        trend_label = 'LH + HL \u2194'  # contracting range = sideways
     elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL \u2194'  # expanding range → sideways
     elif hl == 'HH':                trend_label = 'HH only \u2197'
     elif ll == 'LL':                trend_label = 'LL only \u2198'
@@ -158,17 +154,21 @@ def calculate_trend(pivots: list) -> str:
 
 
 def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> str:
-    up   = {'HH + HL \u2197', 'HH only \u2197', 'LH + HL \u2197'}
-    down = {'LL + LH \u2198', 'LL only \u2198', 'LH + HL \u2198'}
+    true_up   = {'HH + HL \u2197', 'HH only \u2197'}   # last pivot = new HH
+    true_down = {'LL + LH \u2198', 'LL only \u2198'}    # last pivot = LL + LH
 
-    if trend1 in up   and trend2 in down:
-        return f"\u26a0\ufe0f BEARISH: {name1} HH+HL, {name2} LL+LH"
-    if trend1 in down and trend2 in up:
-        return f"\u26a0\ufe0f BULLISH: {name2} HH+HL, {name1} LL+LH"
-    if trend1 in up   and trend2 in up:
-        return "\u2705 ALIGNED: Both HH+HL"
-    if trend1 in down and trend2 in down:
+    # Bearish divergence: asset1 at new highs, asset2 not (LH, sideways, or declining)
+    if trend1 in true_up and trend2 not in true_up:
+        return f"\u26a0\ufe0f BEARISH: {name1} HH+HL, {name2} LH"
+    # Bullish divergence: asset2 at new highs, asset1 not
+    if trend2 in true_up and trend1 not in true_up:
+        return f"\u26a0\ufe0f BULLISH: {name2} HH+HL, {name1} LH"
+    # Both in confirmed downtrend
+    if trend1 in true_down and trend2 in true_down:
         return "\U0001f534 ALIGNED: Both LL+LH"
+    # Both at new highs
+    if trend1 in true_up and trend2 in true_up:
+        return "\u2705 ALIGNED: Both HH+HL"
     return "\u2696\ufe0f Mixed / No clear divergence"
 
 # =============================================================================
