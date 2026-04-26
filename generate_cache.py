@@ -165,10 +165,10 @@ def get_divergence_signal(trend1: str, trend2: str) -> str:
         return "\u26a0\ufe0f BULLISH"
     # Both in confirmed downtrend
     if trend1 in true_down and trend2 in true_down:
-        return "\U0001f534 ALIGNED: Both LL+LH"
+        return "ALIGNED \u2198\u2198"
     # Both at new highs
     if trend1 in true_up and trend2 in true_up:
-        return "\u2705 ALIGNED: Both HH+HL"
+        return "ALIGNED \u2197\u2197"
     return "\u2696\ufe0f Mixed / No clear divergence"
 
 # =============================================================================
