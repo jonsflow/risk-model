@@ -159,10 +159,10 @@ def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> s
 
     # Bearish divergence: asset1 at new highs, asset2 not (LH, sideways, or declining)
     if trend1 in true_up and trend2 not in true_up:
-        return f"\u26a0\ufe0f BEARISH: {name1} HH+HL, {name2} LH"
+        return f"\u26a0\ufe0f BEARISH: {name1}, {name2}"
     # Bullish divergence: asset2 at new highs, asset1 not
     if trend2 in true_up and trend1 not in true_up:
-        return f"\u26a0\ufe0f BULLISH: {name2} HH+HL, {name1} LH"
+        return f"\u26a0\ufe0f BULLISH: {name2}, {name1}"
     # Both in confirmed downtrend
     if trend1 in true_down and trend2 in true_down:
         return "\U0001f534 ALIGNED: Both LL+LH"
