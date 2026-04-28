@@ -281,6 +281,33 @@ function renderPairColumns() {
 // CACHE RENDERING
 // =============================================================================
 
+function renderPressureCard(summary) {
+  const elLabel = document.getElementById('pressure-label');
+  const elScore = document.getElementById('pressure-score');
+  const elRows  = document.getElementById('pressure-rows');
+  if (!elLabel) return;
+
+  const sign  = summary.net_score > 0 ? '+' : '';
+  const color = { BEARISH: '#ef4444', BULLISH: '#10b981', MIXED: '#fbbf24', NEUTRAL: '#a7a7ad' }[summary.label] ?? '#a7a7ad';
+
+  elLabel.innerHTML = `<span style="color:${color}">${summary.label}</span>`
+    + (summary.net_score !== 0 ? ` <span style="font-size:16px">(${sign}${summary.net_score})</span>` : '');
+
+  elScore.textContent = `${summary.bearish_count} bearish · ${summary.bullish_count} bullish`;
+
+  elRows.innerHTML = summary.details.map(d => {
+    const bearish = d.signal.includes('BEARISH');
+    const bullish = d.signal.includes('BULLISH');
+    const bg    = bearish ? 'rgba(239,68,68,0.10)' : bullish ? 'rgba(16,185,129,0.10)' : '#22242a';
+    const clr   = bearish ? '#ef4444'              : bullish ? '#10b981'              : '#a7a7ad';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;`
+      + `background:${bg};border-radius:8px;padding:8px 12px;">`
+      + `<span style="font-size:13px;font-weight:600">${d.label}</span>`
+      + `<span class="divergence-signal" style="margin:0;background:transparent;padding:0;color:${clr}">${d.signal}</span>`
+      + `</div>`;
+  }).join('');
+}
+
 function applyDivergenceCache(cache) {
   // MA-based risk score (from cache)
   const riskScore    = cache.risk_score;
@@ -304,6 +331,9 @@ function applyDivergenceCache(cache) {
     trendScoreElement.textContent = `${label} (${total > 0 ? '+' : ''}${total})`;
     trendScoreElement.style.color = color;
   }
+
+  // Pressure summary card
+  if (cache.summary) renderPressureCard(cache.summary);
 
   // Per-pair: signals + chart render with cached pivots
   for (const pairData of cache.pairs) {

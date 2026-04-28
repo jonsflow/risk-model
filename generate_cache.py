@@ -476,6 +476,33 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
 # DIVERGENCE CACHE GENERATION
 # =============================================================================
 
+def compute_divergence_summary(cache_pairs: list, pairs_config: list) -> dict:
+    id_to_label = {p['id']: f"{p['symbol1']} \u2194 {p['symbol2']}" for p in pairs_config}
+    bearish, bullish, details = [], [], []
+
+    for p in cache_pairs:
+        sig = p['signal']
+        details.append({'id': p['id'], 'label': id_to_label.get(p['id'], p['id']), 'signal': sig})
+        if 'BEARISH' in sig:
+            bearish.append(p['id'])
+        elif 'BULLISH' in sig:
+            bullish.append(p['id'])
+
+    net = len(bullish) - len(bearish)
+    if bearish and bullish:   label = 'MIXED'
+    elif bearish:             label = 'BEARISH'
+    elif bullish:             label = 'BULLISH'
+    else:                     label = 'NEUTRAL'
+
+    return {
+        'bearish_count': len(bearish),
+        'bullish_count': len(bullish),
+        'net_score':     net,
+        'label':         label,
+        'details':       details,
+    }
+
+
 def generate_divergence_cache(pairs: list, symbols: list, data: dict,
                                lookback: int, pivot_mode: str, swing: int) -> dict:
     generated = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
@@ -550,6 +577,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             'pivots2': [{'time': p['time'], 'price': round(p['price'], 4), 'label': p.get('label', '')} for p in pivots2],
         })
 
+    summary = compute_divergence_summary(cache_pairs, pairs)
+
     return {
         'generated':  generated,
         'lookback':   lookback,
@@ -560,7 +589,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             'signal':  risk_signal,
             'details': details,
         },
-        'pairs': cache_pairs,
+        'pairs':   cache_pairs,
+        'summary': summary,
     }
 
 # =============================================================================

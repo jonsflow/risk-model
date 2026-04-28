@@ -42,6 +42,9 @@ jobs:
       - name: Generate trading signals cache
         run: python3 generate_trading_cache.py
 
+      - name: Generate correlation cache
+        run: python3 generate_correlation_cache.py
+
       - name: Commit and push CSV + cache data (if any)
         run: |
           git add data/*.csv data/last_updated.txt data/cache/*.json
