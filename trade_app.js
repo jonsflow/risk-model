@@ -62,6 +62,31 @@ function renderHeader() {
 
   document.getElementById('headerMeta').textContent = `as of ${genStr}`;
   document.getElementById('dayQualityBadge').innerHTML = `<span style="background: ${gradeColor}; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">${grade} — ${gradeLabel}</span>`;
+
+  const w = cacheData.windows || {};
+  const fmt = (w) => {
+    if (!w?.from) return null;
+    return w.from === w.to ? `${w.from} ET` : `${w.from}–${w.to} ET`;
+  };
+
+  const pmLabel  = fmt(w.premarket);
+  const orbLabel = fmt(w.opening_range);
+  const sessLabel = fmt(w.session);
+  const lhLabel  = fmt(w.last_hour);
+
+  const morningParts = [
+    pmLabel  && `Pre-market ${pmLabel}`,
+    orbLabel && `Opening range ${orbLabel}`,
+    'Regime & quality from daily close',
+  ].filter(Boolean);
+  const eodParts = [
+    lhLabel   && `Last hour ${lhLabel}`,
+    sessLabel && `VWAP from session ${sessLabel}`,
+    'Outcomes from daily OHLCV',
+  ].filter(Boolean);
+
+  document.getElementById('morningWindowLabel').textContent = morningParts.join(' · ');
+  document.getElementById('eodWindowLabel').textContent = eodParts.join(' · ');
 }
 
 // =============================================================================
@@ -662,14 +687,6 @@ function renderEodOutcomes(scored) {
        : `<span style="color:#6b7280;">${missLabel}</span>`;
 
   let html = '';
-
-  // Morning cache warning
-  if (cacheData.cache_type === 'morning') {
-    const genStr = new Date(cacheData.generated).toLocaleString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' });
-    html += `<div style="background:#1a1400; border:1px solid #7c6a00; border-radius:6px; padding:10px 14px; margin-bottom:20px; color:#f59e0b; font-size:0.9em;">
-      Cache generated at ${genStr} — market may still be open. Full outcomes update after the 4 PM ET close.
-    </div>`;
-  }
 
   // ── SECTION 1: DAY QUALITY ──────────────────────────────────────────────
   const grade = cacheData.day_quality.grade;

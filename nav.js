@@ -7,7 +7,9 @@
     { href: 'credit.html',   label: 'Credit Spread' },
     { href: 'gov_data.html', label: 'Gov Data'      },
     { href: 'fomc.html',     label: 'FOMC'          },
-    { href: 'trade.html',    label: 'Trade'         },
+    { href: 'correlation.html', label: 'Correlations' },
+    { href: 'fed_chair.html',   label: 'Fed Chair'    },
+    { href: 'trade.html',       label: 'Trade'        },
   ];
 
   const current = location.pathname.split('/').pop() || 'index.html';

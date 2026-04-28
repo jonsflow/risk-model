@@ -15,7 +15,8 @@ Reference list of high-signal divergence pairs for future addition to `config.js
 
 | Pair | Signal |
 |------|--------|
-| ✅ QQQ ↔ TLT | Growth vs rates sensitivity |
+| ✅ SPY ↔ QQQ | S&P 500 vs Nasdaq — large-cap breadth vs growth leadership |
+| QQQ ↔ TLT | Growth vs rates sensitivity |
 | SPY ↔ TLT | Equities vs long-duration bonds |
 
 ## 3. Equity ↔ Volatility (stress & distribution)
@@ -52,6 +53,7 @@ Reference list of high-signal divergence pairs for future addition to `config.js
 
 | Pair | Signal |
 |------|--------|
+| ✅ SPY ↔ SMH | Equities vs semiconductors — tech/AI cycle leadership |
 | XLY ↔ XLP | Discretionary vs staples — cleanest growth/recession read |
 | XLF ↔ XLK | Financials vs tech |
 | XLE ↔ SPY | Energy sector vs broad market |
@@ -61,7 +63,7 @@ Reference list of high-signal divergence pairs for future addition to `config.js
 | Pair | Signal |
 |------|--------|
 | ✅ BTC ↔ SPY | Crypto vs equities |
-| ✅ BTC ↔ GLD | Crypto vs gold |
+| BTC ↔ GLD | Crypto vs gold |
 
 ## High-Signal Core Set (if expanding)
 

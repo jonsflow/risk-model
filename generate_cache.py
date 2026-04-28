@@ -54,7 +54,7 @@ def classify_structure(points: list) -> tuple:
     {time, price, label} dicts (or None) representing the most recent labeled pivot.
     """
     if not points:
-        return 'Sideways \u2194', None, None
+        return 'Sideways →', None, None
 
     highs = find_pivot_highs(points, 1, 1)
     lows  = find_pivot_lows(points,  1, 1)
@@ -66,7 +66,7 @@ def classify_structure(points: list) -> tuple:
     )
 
     if not pivots:
-        return 'Sideways \u2194', None, None
+        return 'Sideways →', None, None
 
     # Seed from window opening price (first bar used as reference, not as pivot)
     running_high = points[0][1]
@@ -98,15 +98,11 @@ def classify_structure(points: list) -> tuple:
     if   hl == 'HH' and ll == 'HL': trend_label = 'HH + HL \u2197'
     elif hl == 'LH' and ll == 'LL': trend_label = 'LL + LH \u2198'
     elif hl == 'LH' and ll == 'HL':
-        ph = prior_high['label'] if prior_high else None
-        pl = prior_low['label']  if prior_low  else None
-        if   pl == 'LL': trend_label = 'LH + HL \u2198'  # HL is a bounce in a downtrend
-        elif ph == 'HH': trend_label = 'LH + HL \u2197'  # LH is a pullback in an uptrend
-        else:            trend_label = 'LH + HL \u2194'  # genuinely mixed
-    elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL \u2194'  # expanding range → sideways
+        trend_label = 'LH + HL →'  # contracting range = sideways
+    elif hl == 'HH' and ll == 'LL': trend_label = 'HH + LL →'  # expanding range → sideways
     elif hl == 'HH':                trend_label = 'HH only \u2197'
     elif ll == 'LL':                trend_label = 'LL only \u2198'
-    else:                           trend_label = 'Sideways \u2194'
+    else:                           trend_label = 'Sideways →'
 
     return trend_label, all_pivots, last_high, last_low
 
@@ -149,27 +145,34 @@ def find_highest_to_current(points: list, bars_each_side: int) -> list:
 
 def calculate_trend(pivots: list) -> str:
     if len(pivots) < 2:
-        return "Sideways \u2194"
+        return "Sideways →"
     if pivots[1]['price'] > pivots[0]['price']:
         return "Higher Highs \u2197"
     if pivots[1]['price'] < pivots[0]['price']:
         return "Lower Highs \u2198"
-    return "Sideways \u2194"
+    return "Sideways →"
 
 
-def get_divergence_signal(trend1: str, trend2: str, name1: str, name2: str) -> str:
-    up   = {'HH + HL \u2197', 'HH only \u2197', 'LH + HL \u2197'}
-    down = {'LL + LH \u2198', 'LL only \u2198', 'LH + HL \u2198'}
+def get_divergence_signal(trend1: str, trend2: str) -> str:
+    true_up   = {'HH + HL \u2197', 'HH only \u2197'}   # last pivot = new HH
+    true_down = {'LL + LH \u2198', 'LL only \u2198'}    # last pivot = LL + LH
 
-    if trend1 in up   and trend2 in down:
-        return f"\u26a0\ufe0f BEARISH: {name1} HH+HL, {name2} LL+LH"
-    if trend1 in down and trend2 in up:
-        return f"\u26a0\ufe0f BULLISH: {name2} HH+HL, {name1} LL+LH"
-    if trend1 in up   and trend2 in up:
-        return "\u2705 ALIGNED: Both HH+HL"
-    if trend1 in down and trend2 in down:
-        return "\U0001f534 ALIGNED: Both LL+LH"
-    return "\u2696\ufe0f Mixed / No clear divergence"
+    a1 = trend1[-1] if trend1 else ''
+    a2 = trend2[-1] if trend2 else ''
+
+    # Bearish divergence: asset1 at new highs, asset2 not (LH, sideways, or declining)
+    if trend1 in true_up and trend2 not in true_up:
+        return f"\u26a0\ufe0f BEARISH {a1}{a2}"
+    # Bullish divergence: asset2 at new highs, asset1 not
+    if trend2 in true_up and trend1 not in true_up:
+        return f"\u26a0\ufe0f BULLISH {a1}{a2}"
+    # Both in confirmed downtrend
+    if trend1 in true_down and trend2 in true_down:
+        return f"ALIGNED {a1}{a2}"
+    # Both at new highs
+    if trend1 in true_up and trend2 in true_up:
+        return f"ALIGNED {a1}{a2}"
+    return f"\u2696\ufe0f Mixed {a1}{a2}"
 
 # =============================================================================
 # CATEGORY THEME DERIVATION
@@ -473,6 +476,33 @@ def generate_macro_cache(categories: list, data: dict, lookback: int, ma_period:
 # DIVERGENCE CACHE GENERATION
 # =============================================================================
 
+def compute_divergence_summary(cache_pairs: list, pairs_config: list) -> dict:
+    id_to_label = {p['id']: f"{p['symbol1']} \u2194 {p['symbol2']}" for p in pairs_config}
+    bearish, bullish, details = [], [], []
+
+    for p in cache_pairs:
+        sig = p['signal']
+        details.append({'id': p['id'], 'label': id_to_label.get(p['id'], p['id']), 'signal': sig})
+        if 'BEARISH' in sig:
+            bearish.append(p['id'])
+        elif 'BULLISH' in sig:
+            bullish.append(p['id'])
+
+    net = len(bullish) - len(bearish)
+    if bearish and bullish:   label = 'MIXED'
+    elif bearish:             label = 'BEARISH'
+    elif bullish:             label = 'BULLISH'
+    else:                     label = 'NEUTRAL'
+
+    return {
+        'bearish_count': len(bearish),
+        'bullish_count': len(bullish),
+        'net_score':     net,
+        'label':         label,
+        'details':       details,
+    }
+
+
 def generate_divergence_cache(pairs: list, symbols: list, data: dict,
                                lookback: int, pivot_mode: str, swing: int) -> dict:
     generated = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
@@ -516,8 +546,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
         if not pts1 or not pts2:
             cache_pairs.append({
                 'id':      pair['id'],
-                'trend1':  'Sideways \u2194',
-                'trend2':  'Sideways \u2194',
+                'trend1':  'Sideways →',
+                'trend2':  'Sideways →',
                 'signal':  '\u23f3 No data available yet',
                 'pivots1': [],
                 'pivots2': [],
@@ -532,11 +562,11 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             pivots2 = find_highest_to_current(recent2, swing)
             trend1 = calculate_trend(pivots1)
             trend2 = calculate_trend(pivots2)
-            signal = get_divergence_signal(trend1, trend2, pair['symbol1'], pair['symbol2'])
+            signal = get_divergence_signal(trend1, trend2)
         else:
             trend1, pivots1, _, _ = classify_structure(recent1)
             trend2, pivots2, _, _ = classify_structure(recent2)
-            signal = get_divergence_signal(trend1, trend2, pair['symbol1'], pair['symbol2'])
+            signal = get_divergence_signal(trend1, trend2)
 
         cache_pairs.append({
             'id':      pair['id'],
@@ -546,6 +576,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             'pivots1': [{'time': p['time'], 'price': round(p['price'], 4), 'label': p.get('label', '')} for p in pivots1],
             'pivots2': [{'time': p['time'], 'price': round(p['price'], 4), 'label': p.get('label', '')} for p in pivots2],
         })
+
+    summary = compute_divergence_summary(cache_pairs, pairs)
 
     return {
         'generated':  generated,
@@ -557,7 +589,8 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
             'signal':  risk_signal,
             'details': details,
         },
-        'pairs': cache_pairs,
+        'pairs':   cache_pairs,
+        'summary': summary,
     }
 
 # =============================================================================

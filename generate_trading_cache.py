@@ -303,24 +303,19 @@ def calculate_moving_average(points: list, period: int) -> list:
 
 def calculate_vwap(hourly_points: list) -> dict:
     """
-    Calculate session VWAP anchored to the start of the current trading day.
+    Calculate session VWAP using regular session bars only (9:30–16:00 ET).
     Returns {'vwap': float, 'above_vwap': bool, 'distance_pct': float}
     """
     if not hourly_points:
         return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
 
-    last_dt = datetime.fromtimestamp(hourly_points[-1][0], tz=timezone.utc)
-    today_date = last_dt.date()
-
-    today_bars = [p for p in hourly_points
-                  if datetime.fromtimestamp(p[0], tz=timezone.utc).date() == today_date]
-
-    if not today_bars:
+    session_bars = get_session_bars(hourly_points, 930, 1600)
+    if not session_bars:
         return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
 
     cum_tp_vol = 0.0
     cum_vol = 0
-    for _, ohlcv in today_bars:
+    for _, ohlcv in session_bars:
         tp = (ohlcv['high'] + ohlcv['low'] + ohlcv['close']) / 3
         cum_tp_vol += tp * ohlcv['volume']
         cum_vol += ohlcv['volume']
@@ -329,7 +324,7 @@ def calculate_vwap(hourly_points: list) -> dict:
         return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
 
     vwap = cum_tp_vol / cum_vol
-    close = hourly_points[-1][1]['close']
+    close = session_bars[-1][1]['close']
     distance_pct = ((close - vwap) / vwap) * 100 if vwap != 0 else 0.0
 
     return {
@@ -586,18 +581,38 @@ def detect_engulfing(points: list, volume_20day_avg: float) -> str:
     return 'none'
 
 
+def get_session_bars(hourly_points: list, start_hhmm: int, end_hhmm: int, target_date=None) -> list:
+    """
+    Filter hourly bars to a time window using ET hours.
+    Times in the CSV are ET stored as-is, so comparing UTC hour/minute gives ET directly.
+    start_hhmm / end_hhmm are integers like 930, 1600 (inclusive start, exclusive end).
+    If target_date is None, uses the latest date in the data.
+    """
+    if not hourly_points:
+        return []
+    if target_date is None:
+        target_date = datetime.fromtimestamp(hourly_points[-1][0], tz=timezone.utc).date()
+    result = []
+    for ts, ohlcv in hourly_points:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        if dt.date() != target_date:
+            continue
+        hhmm = dt.hour * 100 + dt.minute
+        if start_hhmm <= hhmm < end_hhmm:
+            result.append((ts, ohlcv))
+    return result
+
+
 def calculate_opening_range(hourly_points: list) -> float:
     """
-    Calculate opening range from first 2 hourly bars (first 2 hours, 9:30-11:30 AM EST).
+    Calculate opening range from the first regular session bar (9:30–10:30 ET).
     Returns high - low of that range.
     """
-    if len(hourly_points) < 2:
+    session_bars = get_session_bars(hourly_points, 930, 1030)
+    if not session_bars:
         return 0.0
-
-    # Take first 2 hourly bars
-    high = max(hourly_points[0][1]['high'], hourly_points[1][1]['high'])
-    low = min(hourly_points[0][1]['low'], hourly_points[1][1]['low'])
-
+    high = max(b[1]['high'] for b in session_bars)
+    low = min(b[1]['low'] for b in session_bars)
     return high - low
 
 
@@ -649,16 +664,13 @@ def calculate_eod_outcomes(points: list, hourly_points: list, gap: dict, atr_14:
     elif gap['gap_type'] == 'down':
         result['gap_filled'] = today_high >= prev_close
 
-    # ORB: find today's hourly bars by date
+    # ORB: use first 2 regular session bars (9:30-11:30 ET)
     if hourly_points:
-        today_date_str = datetime.fromtimestamp(points[-1][0], tz=timezone.utc).strftime('%Y-%m-%d')
-        today_bars = [
-            bar for bar in hourly_points
-            if datetime.fromtimestamp(bar[0], tz=timezone.utc).strftime('%Y-%m-%d') == today_date_str
-        ]
-        if len(today_bars) >= 2:
-            orb_high = max(today_bars[0][1]['high'], today_bars[1][1]['high'])
-            orb_low = min(today_bars[0][1]['low'], today_bars[1][1]['low'])
+        today_date = datetime.fromtimestamp(points[-1][0], tz=timezone.utc).date()
+        session_bars = get_session_bars(hourly_points, 930, 1030, target_date=today_date)
+        if len(session_bars) >= 1:
+            orb_high = max(b[1]['high'] for b in session_bars)
+            orb_low = min(b[1]['low'] for b in session_bars)
             result['orb_high'] = round(orb_high, 2)
             result['orb_low'] = round(orb_low, 2)
 
@@ -839,12 +851,9 @@ def generate_trading_signals():
     print(f"Generating trading signals for {len(symbols)} symbols: {', '.join(symbols)}...")
 
     now_utc = datetime.now(timezone.utc)
-    # 'morning' if generated before 21:00 UTC (before 4 PM ET close), else 'eod'
-    cache_type = 'morning' if now_utc.hour < 21 else 'eod'
 
     output = {
         'generated': now_utc.isoformat(),
-        'cache_type': cache_type,
         'day_quality': {},
         'regime': {},
         'symbols': {},
@@ -857,6 +866,28 @@ def generate_trading_signals():
     for symbol in symbols:
         daily_data[symbol] = load_daily_csv(symbol)
         hourly_data[symbol] = load_hourly_csv(symbol)
+
+    # Derive actual data windows from SPY (representative symbol)
+    def bar_time(bars, idx):
+        """Return HH:MM string from bar timestamp (times stored as ET)."""
+        if not bars:
+            return None
+        return datetime.fromtimestamp(bars[idx][0], tz=timezone.utc).strftime('%H:%M')
+
+    spy_hourly = hourly_data.get('SPY', [])
+    spy_daily  = daily_data.get('SPY', [])
+    spy_date   = datetime.fromtimestamp(spy_daily[-1][0], tz=timezone.utc).date() if spy_daily else None
+    pm_bars    = get_session_bars(spy_hourly, 800,  930,  target_date=spy_date)
+    orb_bars   = get_session_bars(spy_hourly, 930,  1030, target_date=spy_date)
+    sess_bars  = get_session_bars(spy_hourly, 930,  1600, target_date=spy_date)
+    lh_bars    = get_session_bars(spy_hourly, 1500, 1600, target_date=spy_date)
+
+    output['windows'] = {
+        'premarket':     {'from': bar_time(pm_bars,   0),  'to': bar_time(pm_bars,   -1)},
+        'opening_range': {'from': bar_time(orb_bars,  0),  'to': bar_time(orb_bars,  -1)},
+        'session':       {'from': bar_time(sess_bars, 0),  'to': bar_time(sess_bars, -1)},
+        'last_hour':     {'from': bar_time(lh_bars,   0),  'to': bar_time(lh_bars,   -1)},
+    }
 
     # Process each symbol
     for symbol in symbols:
@@ -891,27 +922,34 @@ def generate_trading_signals():
         volume_20day_avg = sum(volumes[-20:]) / 20 if len(volumes) >= 20 else 0
         volume_50day_avg = sum(volumes[-50:]) / 50 if len(volumes) >= 50 else 0
 
+        # Hourly time-window slices
+        hourly = hourly_data[symbol]
+        today_date = datetime.fromtimestamp(today_ts, tz=timezone.utc).date()
+        premarket_bars = get_session_bars(hourly, 800, 930, target_date=today_date) if hourly else []
+        last_hour_bars = get_session_bars(hourly, 1500, 1600, target_date=today_date) if hourly else []
+
         # Pattern detection
         gap = detect_gap(points)
         outside_day_dir = detect_outside_day(points)
         outside_day = outside_day_dir in ['up', 'down']
-        opening_range = calculate_opening_range(hourly_data[symbol]) if hourly_data[symbol] else 0.0
+        opening_range = calculate_opening_range(hourly) if hourly else 0.0
         orb_qualified = detect_orb_qualified(atr_current, atr_20day_avg, opening_range)
         engulfing = detect_engulfing(points, volume_20day_avg)
-        squeeze = calculate_squeeze(hourly_data[symbol]) if hourly_data[symbol] else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
-        vwap = calculate_vwap(hourly_data[symbol]) if hourly_data[symbol] else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
-        rsi_divergence = calculate_rsi_divergence(hourly_data[symbol]) if hourly_data[symbol] else {'signal': 'unknown', 'description': 'No hourly data'}
-        eod_outcome = calculate_eod_outcomes(points, hourly_data.get(symbol, []), gap, atr_current)
+        squeeze = calculate_squeeze(hourly) if hourly else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
+        vwap = calculate_vwap(hourly) if hourly else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
+        rsi_divergence = calculate_rsi_divergence(hourly) if hourly else {'signal': 'unknown', 'description': 'No hourly data'}
+        eod_outcome = calculate_eod_outcomes(points, hourly, gap, atr_current)
 
         # Day quality (first symbol sets day grade)
         if symbol == 'SPY':
             day_grade = grade_day_quality(points, atr_current, atr_20day_avg, volume_20day_avg, volume_50day_avg)
             day_grade = apply_weekday_modifier(day_grade, today_ts)
             output['day_quality']['grade'] = day_grade
+            vol_above_50d = today_ohlcv['volume'] > volume_50day_avg
             output['day_quality']['modifiers'] = {
                 'atr_above_avg': atr_current > atr_20day_avg,
-                'volume_above_20d': today_ohlcv['volume'] > volume_20day_avg,
-                'volume_above_50d': today_ohlcv['volume'] > volume_50day_avg,
+                'volume_above_20d': (today_ohlcv['volume'] > volume_20day_avg) or vol_above_50d,
+                'volume_above_50d': vol_above_50d,
                 'prior_day_move_pct': gap['gap_pct']
             }
 
@@ -948,7 +986,17 @@ def generate_trading_signals():
             'squeeze': squeeze,
             'vwap': vwap,
             'rsi_divergence': rsi_divergence,
-            'eod_outcome': eod_outcome
+            'eod_outcome': eod_outcome,
+            'premarket': {
+                'high': round(max(b[1]['high'] for b in premarket_bars), 2) if premarket_bars else None,
+                'low':  round(min(b[1]['low']  for b in premarket_bars), 2) if premarket_bars else None,
+                'close': round(premarket_bars[-1][1]['close'], 2) if premarket_bars else None,
+            },
+            'last_hour': {
+                'high':  round(max(b[1]['high'] for b in last_hour_bars), 2) if last_hour_bars else None,
+                'low':   round(min(b[1]['low']  for b in last_hour_bars), 2) if last_hour_bars else None,
+                'close': round(last_hour_bars[-1][1]['close'], 2) if last_hour_bars else None,
+            },
         }
 
         # Track active patterns (include pre-computed levels + outcome for EOD review)
