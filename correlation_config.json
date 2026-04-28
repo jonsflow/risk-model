@@ -1,0 +1,70 @@
+{
+  "windows": { "short": 20, "primary": 63, "structural": 252 },
+  "historyDays": 504,
+  "pairs": [
+    {
+      "id": "spy-uup",
+      "label": "SPY vs Dollar",
+      "subtitle": "Risk-on/off pair — weak but persistent inverse; dollar strengthens as equities sell off into safe-haven flows",
+      "asset1": { "symbol": "spy", "label": "SPY" },
+      "asset2": { "symbol": "uup", "label": "UUP" },
+      "expectedSign": -1
+    },
+    {
+      "id": "spy-uso",
+      "label": "SPY vs Crude Oil",
+      "subtitle": "Demand-driven pair — both fall on weak growth expectations; inverts on geopolitical supply shocks",
+      "asset1": { "symbol": "spy", "label": "SPY" },
+      "asset2": { "symbol": "uso", "label": "USO" },
+      "expectedSign": 1
+    },
+    {
+      "id": "spy-gld",
+      "label": "SPY vs Gold",
+      "subtitle": "Unstable long-run pair (~zero avg) — turns inverse in crises and high-inflation regimes; both rising signals stagflation concern",
+      "asset1": { "symbol": "spy", "label": "SPY" },
+      "asset2": { "symbol": "gld", "label": "GLD" },
+      "expectedSign": -1
+    },
+    {
+      "id": "spy-tlt",
+      "label": "SPY vs Long Bonds",
+      "subtitle": "Inflation-regime dependent — inverse pre-2022 (flight-to-safety); positive since 2022 as rate shock drives both lower",
+      "asset1": { "symbol": "spy", "label": "SPY" },
+      "asset2": { "symbol": "tlt", "label": "TLT" },
+      "expectedSign": 1
+    },
+    {
+      "id": "uup-gld",
+      "label": "Dollar vs Gold",
+      "subtitle": "Historically robust inverse — gold priced in USD globally; strong dollar raises cost for foreign buyers",
+      "asset1": { "symbol": "uup", "label": "UUP" },
+      "asset2": { "symbol": "gld", "label": "GLD" },
+      "expectedSign": -1
+    },
+    {
+      "id": "uup-eem",
+      "label": "Dollar vs EM",
+      "subtitle": "Strong dollar = higher EM debt servicing costs and capital outflows; one of the more reliable inverse pairs",
+      "asset1": { "symbol": "uup", "label": "UUP" },
+      "asset2": { "symbol": "eem", "label": "EEM" },
+      "expectedSign": -1
+    },
+    {
+      "id": "uup-dbc",
+      "label": "Dollar vs Commodities",
+      "subtitle": "Theoretical inverse (USD-priced commodities) — but relationship has been unreliable since 2016 and near-random post-COVID",
+      "asset1": { "symbol": "uup", "label": "UUP" },
+      "asset2": { "symbol": "dbc", "label": "DBC" },
+      "expectedSign": -1
+    },
+    {
+      "id": "xly-xlp",
+      "label": "Discretionary vs Staples",
+      "subtitle": "Economic cycle gauge — co-move in bull markets; staples outperform in downturns as capital rotates to defensive",
+      "asset1": { "symbol": "xly", "label": "XLY" },
+      "asset2": { "symbol": "xlp", "label": "XLP" },
+      "expectedSign": 1
+    }
+  ]
+}
