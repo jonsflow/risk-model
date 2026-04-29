@@ -155,12 +155,12 @@ function addChartOverlay(chart, containerId, { regions = [], lines = [] } = {}) 
       const lx = Math.round(x);
 
       const line = document.createElement('div');
-      line.style.cssText = `position:absolute;top:0;bottom:20px;left:${lx}px;width:1px;background:${m.color};opacity:0.7`;
+      line.style.cssText = `position:absolute;top:0;bottom:22px;left:${lx}px;width:1px;background:${m.color};opacity:0.7`;
       overlay.appendChild(line);
 
-      const top = (i % 2 === 0) ? 4 : 18;
+      const bottom = (i % 2 === 0) ? 4 : 14;
       const label = document.createElement('div');
-      label.style.cssText = `position:absolute;top:${top}px;left:${lx + 3}px;font-size:10px;color:${m.color};white-space:nowrap;font-weight:600`;
+      label.style.cssText = `position:absolute;bottom:${bottom}px;left:${lx}px;transform:translateX(-50%);font-size:10px;color:${m.color};white-space:nowrap;font-weight:600`;
       label.textContent = m.label;
       overlay.appendChild(label);
     }
@@ -544,8 +544,6 @@ function renderRateChart(data) {
     ],
     lines: [
       { date: ERA.faitAdopted,  label: 'FAIT',  color: '#f59e0b' },
-      { date: ERA.firstHike,    label: 'Hike',  color: '#ef4444' },
-      { date: ERA.firstCut,     label: 'Cut',   color: '#34d399' },
       { date: ERA.warshHearing, label: 'Warsh', color: '#f97316' },
     ],
   });
