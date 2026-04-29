@@ -1,6 +1,6 @@
-# Risk Divergence Dashboard
+# Risk Model
 
-**Static GitHub Pages site** with six dashboards for monitoring macro risk signals.
+**Static GitHub Pages site** — macro risk dashboards covering divergence signals, macro model, credit spreads, FRED economic data, FOMC policy, Fed Chair transitions, and cross-asset correlations.
 
 Uses **GitHub Actions** to fetch data from **Yahoo Finance** (via `yfinance`) and **FRED** (via `fredapi`), run Python analysis, and serve everything as static files. The browser fetches precomputed cache JSON or raw CSVs and renders — no backend required.
 
