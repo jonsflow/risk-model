@@ -111,6 +111,65 @@ function nYearsAgo(n) {
   return d.toISOString().slice(0, 10);
 }
 
+// =============================================================================
+// CHART OVERLAY — vertical lines + shaded era regions
+// Positioned using timeToCoordinate; re-renders on visible range change.
+// =============================================================================
+
+function addChartOverlay(chart, containerId, { regions = [], lines = [] } = {}) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  if (getComputedStyle(container).position === 'static') {
+    container.style.position = 'relative';
+  }
+
+  const existing = container.querySelector('.era-overlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'era-overlay';
+  overlay.style.cssText = 'position:absolute;top:0;left:0;right:0;bottom:0;pointer-events:none;overflow:hidden;z-index:1';
+  container.appendChild(overlay);
+
+  function render() {
+    overlay.innerHTML = '';
+    const ts = chart.timeScale();
+    const w  = container.clientWidth;
+
+    for (const r of regions) {
+      let x1 = ts.timeToCoordinate(r.from) ?? 0;
+      let x2 = ts.timeToCoordinate(r.to)   ?? w;
+      x1 = Math.max(0, Math.round(x1));
+      x2 = Math.min(w, Math.round(x2));
+      if (x2 <= x1) continue;
+      const div = document.createElement('div');
+      div.style.cssText = `position:absolute;top:0;bottom:0;left:${x1}px;width:${x2 - x1}px;background:${r.color}`;
+      overlay.appendChild(div);
+    }
+
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i];
+      const x = ts.timeToCoordinate(m.date);
+      if (x === null || x < 0 || x > w) continue;
+      const lx = Math.round(x);
+
+      const line = document.createElement('div');
+      line.style.cssText = `position:absolute;top:0;bottom:20px;left:${lx}px;width:1px;background:${m.color};opacity:0.7`;
+      overlay.appendChild(line);
+
+      const top = (i % 2 === 0) ? 4 : 18;
+      const label = document.createElement('div');
+      label.style.cssText = `position:absolute;top:${top}px;left:${lx + 3}px;font-size:10px;color:${m.color};white-space:nowrap;font-weight:600`;
+      label.textContent = m.label;
+      overlay.appendChild(label);
+    }
+  }
+
+  chart.timeScale().subscribeVisibleTimeRangeChange(render);
+  setTimeout(render, 50);
+}
+
 function destroyChart(id) {
   if (fedChairCharts.has(id)) {
     try { fedChairCharts.get(id).remove(); } catch (_) {}
@@ -280,23 +339,6 @@ function renderBalanceSheetChart(data) {
     mLine.setData(toB(mbst));
   }
 
-  // Era markers at key transition dates
-  const markers = [
-    { target: ERA.powellStart, label: 'Powell →', color: '#7aa2f7', pos: 'aboveBar' },
-    { target: ERA.covidQE,     label: 'COVID QE',  color: '#ef4444', pos: 'aboveBar' },
-    { target: ERA.qtBegins,    label: '← QT',      color: '#34d399', pos: 'belowBar' },
-    { target: ERA.warshHearing,label: 'Warsh →',   color: '#f97316', pos: 'aboveBar' },
-  ].map(m => ({
-    time: nearestDate(walcl, m.target),
-    position: m.pos,
-    color: m.color,
-    shape: 'circle',
-    text: m.label,
-    size: 0.7,
-  })).filter(m => m.time);
-
-  LightweightCharts.createSeriesMarkers(totalArea, markers);
-
   const lastW = walcl[walcl.length - 1];
   const entries = [
     { label: 'Total Assets', color: ChartUtils.colors.balSheet, value: `$${(lastW.value / 1000).toFixed(0)}B` },
@@ -306,6 +348,18 @@ function renderBalanceSheetChart(data) {
   ChartUtils.addChartLegend('chart-balance-sheet', entries);
 
   ChartUtils.fitWithRightPadding(chart, walcl.length, 0.04);
+
+  addChartOverlay(chart, 'chart-balance-sheet', {
+    regions: [
+      { from: ERA.powellStart,  to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshHearing, to: '2030-01-01',     color: 'rgba(249,115,22,0.05)'  },
+    ],
+    lines: [
+      { date: ERA.covidQE,      label: 'COVID QE', color: '#ef4444' },
+      { date: ERA.qtBegins,     label: 'QT',       color: '#34d399' },
+      { date: ERA.warshHearing, label: 'Warsh',    color: '#f97316' },
+    ],
+  });
 }
 
 // =============================================================================
@@ -367,6 +421,14 @@ function renderInflationChart(data) {
   ChartUtils.addChartLegend('chart-inflation', entries);
 
   ChartUtils.fitWithRightPadding(chart, Math.max(pceYoY.length, cpiYoY.length), 0.04);
+
+  addChartOverlay(chart, 'chart-inflation', {
+    lines: [
+      { date: ERA.firstHike,     label: 'Hike',      color: '#ef4444' },
+      { date: ERA.faitAbandoned, label: 'FAIT end',  color: '#f59e0b' },
+      { date: ERA.warshHearing,  label: 'Warsh',     color: '#f97316' },
+    ],
+  });
 }
 
 // =============================================================================
@@ -424,6 +486,13 @@ function renderBreakevenChart(data) {
   ChartUtils.addChartLegend('chart-breakevens', entries);
 
   ChartUtils.fitWithRightPadding(chart, t10yie.length, 0.04);
+
+  addChartOverlay(chart, 'chart-breakevens', {
+    lines: [
+      { date: ERA.firstHike,    label: 'Hike',  color: '#ef4444' },
+      { date: ERA.warshHearing, label: 'Warsh', color: '#f97316' },
+    ],
+  });
 }
 
 // =============================================================================
@@ -458,24 +527,6 @@ function renderRateChart(data) {
   });
   area.setData(combined);
 
-  // Era markers
-  const eraMarkers = [
-    { target: ERA.powellStart,   label: 'Powell →', color: '#7aa2f7', pos: 'aboveBar' },
-    { target: ERA.faitAdopted,   label: 'FAIT',     color: '#f59e0b', pos: 'aboveBar' },
-    { target: ERA.firstHike,     label: 'Hike ↑',  color: '#ef4444', pos: 'aboveBar' },
-    { target: ERA.firstCut,      label: 'Cut ↓',   color: '#34d399', pos: 'belowBar' },
-    { target: ERA.warshHearing,  label: 'Warsh →', color: '#f97316', pos: 'aboveBar' },
-  ].map(m => ({
-    time: nearestDate(combined, m.target),
-    position: m.pos,
-    color: m.color,
-    shape: 'circle',
-    text: m.label,
-    size: 0.7,
-  })).filter(m => m.time);
-
-  LightweightCharts.createSeriesMarkers(area, eraMarkers);
-
   const lastVal = combined[combined.length - 1].value;
   ChartUtils.addChartLegend('chart-rates', [
     { label: 'EFFR', color: ChartUtils.colors.rate, value: `${lastVal.toFixed(2)}%` },
@@ -485,6 +536,19 @@ function renderRateChart(data) {
   const visibleBars = combined.filter(p => p.time >= viewFrom).length;
   chart.timeScale().applyOptions({ rightOffset: Math.ceil(visibleBars * 0.04) });
   chart.timeScale().setVisibleRange({ from: viewFrom, to: combined[combined.length - 1].time });
+
+  addChartOverlay(chart, 'chart-rates', {
+    regions: [
+      { from: ERA.powellStart,  to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshHearing, to: '2030-01-01',     color: 'rgba(249,115,22,0.05)'  },
+    ],
+    lines: [
+      { date: ERA.faitAdopted,  label: 'FAIT',  color: '#f59e0b' },
+      { date: ERA.firstHike,    label: 'Hike',  color: '#ef4444' },
+      { date: ERA.firstCut,     label: 'Cut',   color: '#34d399' },
+      { date: ERA.warshHearing, label: 'Warsh', color: '#f97316' },
+    ],
+  });
 }
 
 // =============================================================================
