@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Risk Divergence Dashboard is a static GitHub Pages site with six pages:
+Risk Model is a static GitHub Pages site with eight pages covering divergence signals, macro model, credit spreads, FRED economic data, FOMC policy, Fed Chair transitions, cross-asset correlations, and trade signals:
 
 | Page | File | Data Source | Analysis |
 |------|------|-------------|----------|
