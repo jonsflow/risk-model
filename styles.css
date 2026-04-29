@@ -199,7 +199,11 @@ code {
   padding: 0.75rem 0;
   margin-bottom: 18px;
   border-bottom: 1px solid #2a2b2f;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
 }
+.site-nav::-webkit-scrollbar { display: none; }
 
 .nav-link {
   color: #888;
@@ -208,6 +212,8 @@ code {
   border-radius: 6px;
   font-size: 14px;
   transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .nav-link.active,
