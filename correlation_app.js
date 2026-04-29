@@ -26,9 +26,20 @@ const LC = window.LightweightCharts;
 // =============================================================================
 
 async function loadCorrelations() {
-  const r = await fetch(CACHE_PATH, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`Failed to fetch ${CACHE_PATH}: ${r.status}`);
-  return r.json();
+  const [cacheRes, configRes] = await Promise.all([
+    fetch(CACHE_PATH, { cache: 'no-store' }),
+    fetch('./correlation_config.json', { cache: 'no-store' }),
+  ]);
+  if (!cacheRes.ok) throw new Error(`Failed to fetch ${CACHE_PATH}: ${cacheRes.status}`);
+  const data = await cacheRes.json();
+  if (configRes.ok) {
+    const config = await configRes.json();
+    const signMap = Object.fromEntries(config.pairs.map(p => [p.id, p.expectedSign]));
+    for (const pair of data.pairs) {
+      if (signMap[pair.id] !== undefined) pair.expectedSign = signMap[pair.id];
+    }
+  }
+  return data;
 }
 
 // =============================================================================
@@ -139,6 +150,10 @@ function renderPairCard(pair, historyDays) {
   const dominantYrs = pair.dominantBars != null ? (pair.dominantBars / 252).toFixed(1) + 'yr' : '—';
   const structNote = `Typical range over past year: ${structMean} ± ${structStd}`;
 
+  const currentSign = pair.current.primary_corr >= 0 ? 1 : -1;
+  const currentDir = currentSign === -1 ? 'inverse (−)' : 'positive (+)';
+  const currentColor = regime === 'NORMAL' ? '#7aa2f7' : regime === 'WEAKENING' ? '#f59e0b' : '#f97316';
+
   const dsi = pair.current.days_since_intact;
   const sinceLine = regime === 'NORMAL'
     ? 'Currently intact'
@@ -151,14 +166,14 @@ function renderPairCard(pair, historyDays) {
   card.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:6px">
       <div>
-        <div style="font-size:15px;font-weight:700;margin-bottom:2px">${pair.label}</div>
+        <div style="font-size:15px;font-weight:700;margin-bottom:2px">${pair.label} <span style="font-size:12px;font-weight:400;color:#a7a7ad">${pair.asset1.label} / ${pair.asset2.label}</span></div>
         <div class="muted" style="font-size:12px">${pair.subtitle}</div>
       </div>
       <span style="background:${regimeColor};color:#000;font-size:11px;font-weight:700;padding:3px 9px;border-radius:4px;white-space:nowrap;margin-left:12px">${regimeLabel}</span>
     </div>
     <div class="muted" style="font-size:11px;margin:8px 0 3px 0">${structNote}</div>
-    <div class="muted" style="font-size:11px;margin-bottom:3px">Expected: ${expectedDir}</div>
-    <div class="muted" style="font-size:11px;margin-bottom:3px">Data: ${dominantDir} · avg ${dominantAvg} · ${dominantPct}% pos · ${dominantYrs}</div>
+    <div class="muted" style="font-size:11px;margin-bottom:3px">Expected: ${expectedDir} · Historical norm: ${dominantDir} · avg ${dominantAvg} · ${dominantPct}% pos · ${dominantYrs}</div>
+    <div style="font-size:11px;font-weight:600;color:${currentColor};margin-bottom:3px">Currently: ${currentDir} (63d: ${primaryVal} · 20d: ${shortVal})</div>
     <div class="muted" style="font-size:11px;margin-bottom:8px">${sinceLine}</div>
     <div id="${chartId}" style="width:100%;height:160px"></div>
   `;

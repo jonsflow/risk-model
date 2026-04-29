@@ -21,18 +21,18 @@
     {
       "id": "spy-gld",
       "label": "SPY vs Gold",
-      "subtitle": "Unstable long-run pair (~zero avg) — turns inverse in crises and high-inflation regimes; both rising signals stagflation concern",
+      "subtitle": "Mildly positive long-run pair — both are real assets; turns sharply inverse in crises as gold becomes a safe haven while equities fall",
       "asset1": { "symbol": "spy", "label": "SPY" },
       "asset2": { "symbol": "gld", "label": "GLD" },
-      "expectedSign": -1
+      "expectedSign": 1
     },
     {
       "id": "spy-tlt",
       "label": "SPY vs Long Bonds",
-      "subtitle": "Inflation-regime dependent — inverse pre-2022 (flight-to-safety); positive since 2022 as rate shock drives both lower",
+      "subtitle": "Historically inverse (flight-to-safety pre-2022) — both fell together during the 2022 rate shock, making this pair the most regime-sensitive on the board",
       "asset1": { "symbol": "spy", "label": "SPY" },
       "asset2": { "symbol": "tlt", "label": "TLT" },
-      "expectedSign": 1
+      "expectedSign": -1
     },
     {
       "id": "uup-gld",
