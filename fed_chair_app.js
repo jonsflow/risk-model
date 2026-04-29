@@ -422,6 +422,10 @@ function renderInflationChart(data) {
   ChartUtils.fitWithRightPadding(chart, Math.max(pceYoY.length, cpiYoY.length), 0.04);
 
   addChartOverlay(chart, 'chart-inflation', {
+    regions: [
+      { from: ERA.powellStart,  to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshHearing, to: '2030-01-01',     color: 'rgba(249,115,22,0.05)'  },
+    ],
     lines: [
       { date: ERA.firstHike,     label: 'Hike',      color: '#ef4444' },
       { date: ERA.faitAbandoned, label: 'FAIT end',  color: '#f59e0b' },
@@ -487,6 +491,10 @@ function renderBreakevenChart(data) {
   ChartUtils.fitWithRightPadding(chart, t10yie.length, 0.04);
 
   addChartOverlay(chart, 'chart-breakevens', {
+    regions: [
+      { from: ERA.powellStart,  to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshHearing, to: '2030-01-01',     color: 'rgba(249,115,22,0.05)'  },
+    ],
     lines: [
       { date: ERA.firstHike,    label: 'Hike',  color: '#ef4444' },
       { date: ERA.firstCut,     label: 'Cut',   color: '#34d399' },
@@ -599,6 +607,17 @@ function renderReservesChart(data) {
   ChartUtils.addChartLegend('chart-reserves', entries);
 
   ChartUtils.fitWithRightPadding(chart, resFiltered.length, 0.04);
+
+  addChartOverlay(chart, 'chart-reserves', {
+    regions: [
+      { from: ERA.powellStart,  to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshHearing, to: '2030-01-01',     color: 'rgba(249,115,22,0.05)'  },
+    ],
+    lines: [
+      { date: ERA.qtBegins,     label: 'QT',    color: '#34d399' },
+      { date: ERA.warshHearing, label: 'Warsh', color: '#f97316' },
+    ],
+  });
 }
 
 // =============================================================================
