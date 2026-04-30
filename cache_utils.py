@@ -52,6 +52,30 @@ def load_daily_csv(symbol: str) -> list:
     return points
 
 
+def load_hourly_close(symbol: str) -> list:
+    """Read data/{symbol}_hourly.csv, return [(timestamp_secs, close), ...]"""
+    path = DATA_DIR / f"{symbol.lower()}_hourly.csv"
+    if not path.exists():
+        return []
+    points = []
+    with open(path, newline='', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            date_str = row.get('Date', '').strip()
+            time_str = row.get('Time', '').strip()
+            close    = row.get('Close', '').strip()
+            if not date_str or not time_str or not close:
+                continue
+            try:
+                t = int(datetime.strptime(f"{date_str} {time_str}", '%Y-%m-%d %H:%M:%S')
+                        .replace(tzinfo=timezone.utc).timestamp())
+                points.append((t, float(close)))
+            except (ValueError, KeyError):
+                continue
+    points.sort(key=lambda x: x[0])
+    return points
+
+
 def calculate_ma(points: list, period: int) -> list:
     """Simple moving average on [(timestamp, value), ...]. Returns same format."""
     ma_points = []

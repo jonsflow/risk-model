@@ -13,6 +13,7 @@ let dataCache = {};
 let CONFIG = null;
 let PAIRS = [];
 let SYMBOLS = [];
+let TREND_ASSETS = [];
 
 // =============================================================================
 // UTILITIES
@@ -40,6 +41,7 @@ async function loadConfig() {
   CONFIG = config;
   PAIRS = config.pairs || [];
   SYMBOLS = config.symbols.map(s => s.symbol.toLowerCase());
+  TREND_ASSETS = config.trend_assets || [];
 
   console.log(`Loaded config: ${SYMBOLS.length} symbols, ${PAIRS.length} pairs`);
 }
@@ -210,14 +212,10 @@ function trendArrow(trendStr) {
   return '→';
 }
 
-function scorePair(t1, t2) {
-  const a = classifyTrend(t1), b = classifyTrend(t2);
-  if (a === 'up'       && b === 'up')       return  2;
-  if (a === 'up'       && b === 'sideways') return  1;
-  if (a === 'sideways' && b === 'up')       return  1;
-  if (a === 'down'     && b === 'sideways') return -1;
-  if (a === 'sideways' && b === 'down')     return -1;
-  if (a === 'down'     && b === 'down')     return -2;
+function scoreSymbol(trendStr) {
+  const t = classifyTrend(trendStr);
+  if (t === 'up')   return  1;
+  if (t === 'down') return -1;
   return 0;
 }
 
@@ -307,11 +305,20 @@ function applyDivergenceCache(cache) {
   // Trend-structure risk score (computed from pair trend labels)
   const trendScoreElement = document.getElementById("trend-risk-score");
 
-  let total = 0;
+  const symbolTrendMap = new Map();
   for (const pairData of cache.pairs) {
-    total += scorePair(pairData.trend1, pairData.trend2);
+    const pairConfig = PAIRS.find(p => p.id === pairData.id);
+    if (!pairConfig) continue;
+    if (!symbolTrendMap.has(pairConfig.symbol1)) symbolTrendMap.set(pairConfig.symbol1, pairData.trend1);
+    if (!symbolTrendMap.has(pairConfig.symbol2)) symbolTrendMap.set(pairConfig.symbol2, pairData.trend2);
   }
-  const maxTotal = cache.pairs.length * 2;
+
+  let total = 0;
+  for (const symbol of TREND_ASSETS) {
+    const trend = symbolTrendMap.get(symbol);
+    if (trend !== undefined) total += scoreSymbol(trend);
+  }
+  const maxTotal = TREND_ASSETS.length;
   const { label, color } = trendSignalLabel(total, maxTotal);
 
   if (trendScoreElement) {

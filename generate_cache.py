@@ -18,6 +18,7 @@ from cache_utils import (
     TICKER_MAP,
     last,
     load_daily_csv,
+    load_hourly_close,
     calculate_ma,
     find_pivot_highs,
     find_pivot_lows,
@@ -597,6 +598,65 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
 # MAIN
 # =============================================================================
 
+TREND_LOOKBACKS = {
+    'hourly': 40,   # ~1 week for equities
+    'daily':  30,   # ~1 month
+    'weekly': 13,   # ~3 months
+}
+
+
+def classifyTrend_py(label: str) -> str:
+    if '↗' in label: return 'up'
+    if '↘' in label: return 'down'
+    return 'sideways'
+
+
+def aggregate_weekly(daily_points: list) -> list:
+    weeks = {}
+    for t, c in daily_points:
+        d = datetime.fromtimestamp(t, tz=timezone.utc).date()
+        key = d.isocalendar()[:2]  # (year, week_number)
+        weeks[key] = (t, c)        # last bar in the week wins
+    return sorted(weeks.values(), key=lambda x: x[0])
+
+
+def generate_trend_structure_cache(config: dict) -> dict:
+    trend_assets = config.get('trend_assets', [])
+    symbol_names = {s['symbol']: s['name'] for s in config.get('symbols', [])}
+
+    daily_data  = {sym: load_daily_csv(sym)    for sym in trend_assets}
+    hourly_data = {sym: load_hourly_close(sym) for sym in trend_assets}
+    weekly_data = {sym: aggregate_weekly(daily_data[sym]) for sym in trend_assets}
+
+    source_map = {'hourly': hourly_data, 'daily': daily_data, 'weekly': weekly_data}
+
+    timeframes = {}
+    for tf, lookback in TREND_LOOKBACKS.items():
+        assets = []
+        for sym in trend_assets:
+            points = last(source_map[tf][sym], lookback)
+            if len(points) < 3:
+                trend_label = 'Sideways →'
+            else:
+                trend_label, _, _, _ = classify_structure(points)
+            direction = classifyTrend_py(trend_label)
+            score = 1 if direction == 'up' else (-1 if direction == 'down' else 0)
+            assets.append({
+                'symbol':       sym,
+                'name':         symbol_names.get(sym, sym),
+                'trend_label':  trend_label,
+                'price_points': [[p[0], round(p[1], 4)] for p in points],
+                'score':        score,
+            })
+        total = sum(a['score'] for a in assets)
+        timeframes[tf] = {'assets': assets, 'total_score': total, 'max_score': len(assets)}
+
+    return {
+        'generated': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'timeframes': timeframes,
+    }
+
+
 def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -666,7 +726,15 @@ def main():
                 div_count += 1
     print(f"  Written {div_count} divergence cache files")
 
-    print(f"\nDone! {macro_count} macro + {div_count} divergence = {macro_count + div_count} total cache files in {CACHE_DIR}/")
+    # --- Trend structure cache (1 file) ---
+    print("\nGenerating trend structure cache...")
+    ts_cache = generate_trend_structure_cache(config)
+    ts_path  = CACHE_DIR / "trend_structure.json"
+    with open(ts_path, 'w', encoding='utf-8') as f:
+        json.dump(ts_cache, f, ensure_ascii=False, separators=(',', ':'))
+    print("  Written trend_structure.json")
+
+    print(f"\nDone! {macro_count} macro + {div_count} divergence + 1 trend structure = {macro_count + div_count + 1} total cache files in {CACHE_DIR}/")
 
 
 if __name__ == "__main__":
