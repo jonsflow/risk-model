@@ -13,6 +13,7 @@ let dataCache = {};
 let CONFIG = null;
 let PAIRS = [];
 let SYMBOLS = [];
+let TREND_ASSETS = [];
 
 // =============================================================================
 // UTILITIES
@@ -40,6 +41,7 @@ async function loadConfig() {
   CONFIG = config;
   PAIRS = config.pairs || [];
   SYMBOLS = config.symbols.map(s => s.symbol.toLowerCase());
+  TREND_ASSETS = config.trend_assets || [];
 
   console.log(`Loaded config: ${SYMBOLS.length} symbols, ${PAIRS.length} pairs`);
 }
@@ -210,24 +212,21 @@ function trendArrow(trendStr) {
   return '→';
 }
 
-function scorePair(t1, t2) {
-  const a = classifyTrend(t1), b = classifyTrend(t2);
-  if (a === 'up'       && b === 'up')       return  2;
-  if (a === 'up'       && b === 'sideways') return  1;
-  if (a === 'sideways' && b === 'up')       return  1;
-  if (a === 'down'     && b === 'sideways') return -1;
-  if (a === 'sideways' && b === 'down')     return -1;
-  if (a === 'down'     && b === 'down')     return -2;
+function scoreSymbol(trendStr) {
+  const t = classifyTrend(trendStr);
+  if (t === 'up')   return  1;
+  if (t === 'down') return -1;
   return 0;
 }
 
 function trendSignalLabel(score, maxTotal) {
   const r = score / maxTotal;
   const c = ChartUtils.colors;
-  if (r >= 0.67)  return { label: '🟢 STRONG RISK ON',  color: c.signalStrongOn };
-  if (r >= 0.25)  return { label: '🟡 RISK ON',         color: c.signalOn };
-  if (r >= -0.17) return { label: '⚪ NEUTRAL',          color: c.signalNeutral };
-  if (r >= -0.58) return { label: '🟠 RISK OFF',         color: c.signalOff };
+  // Thresholds based on 7-asset scoring (max ±7): STRONG requires ≥6, ON ≥4, OFF ≤-4, STRONG OFF ≤-6
+  if (r >= 6/7)   return { label: '🟢 STRONG RISK ON',  color: c.signalStrongOn };
+  if (r >= 4/7)   return { label: '🟡 RISK ON',         color: c.signalOn };
+  if (r >= -3/7)  return { label: '⚪ NEUTRAL',          color: c.signalNeutral };
+  if (r >= -5/7)  return { label: '🟠 RISK OFF',         color: c.signalOff };
   return           { label: '🔴 STRONG RISK OFF',        color: c.signalStrongOff };
 }
 
@@ -292,7 +291,7 @@ function renderPressureCard(summary) {
   elLabel.innerHTML = `<span style="color:${color}">${summary.label}</span>`
     + (summary.net_score !== 0 ? ` <span style="font-size:16px">(${sign}${summary.net_score})</span>` : '');
 
-  elScore.textContent = `${summary.bearish_count} bearish · ${summary.bullish_count} bullish`;
+  elScore.textContent = `${summary.bearish_count} bearish · ${summary.bullish_count} bullish (max ±6)`;
 }
 
 function applyDivergenceCache(cache) {
@@ -307,11 +306,20 @@ function applyDivergenceCache(cache) {
   // Trend-structure risk score (computed from pair trend labels)
   const trendScoreElement = document.getElementById("trend-risk-score");
 
-  let total = 0;
+  const symbolTrendMap = new Map();
   for (const pairData of cache.pairs) {
-    total += scorePair(pairData.trend1, pairData.trend2);
+    const pairConfig = PAIRS.find(p => p.id === pairData.id);
+    if (!pairConfig) continue;
+    if (!symbolTrendMap.has(pairConfig.symbol1)) symbolTrendMap.set(pairConfig.symbol1, pairData.trend1);
+    if (!symbolTrendMap.has(pairConfig.symbol2)) symbolTrendMap.set(pairConfig.symbol2, pairData.trend2);
   }
-  const maxTotal = cache.pairs.length * 2;
+
+  let total = 0;
+  for (const symbol of TREND_ASSETS) {
+    const trend = symbolTrendMap.get(symbol);
+    if (trend !== undefined) total += scoreSymbol(trend);
+  }
+  const maxTotal = TREND_ASSETS.length;
   const { label, color } = trendSignalLabel(total, maxTotal);
 
   if (trendScoreElement) {
@@ -341,7 +349,7 @@ function applyDivergenceCache(cache) {
     // Per-pair score chips: MA status for each symbol + trend direction score
     const pairScoresEl = document.getElementById(`${pairData.id}-pair-scores`);
     if (pairScoresEl) {
-      const score = scorePair(pairData.trend1, pairData.trend2);
+      const score = scoreSymbol(pairData.trend1) + scoreSymbol(pairData.trend2);
       const sign = score > 0 ? '+' : '';
       const detail1 = riskScore.details.find(d => d.startsWith(pair.symbol1 + ':')) || '';
       const detail2 = riskScore.details.find(d => d.startsWith(pair.symbol2 + ':')) || '';

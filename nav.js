@@ -10,6 +10,7 @@
     { href: 'correlation.html', label: 'Correlations' },
     { href: 'fed_chair.html',   label: 'Fed Chair'    },
     { href: 'trade.html',       label: 'Trade'        },
+    { href: 'trend_structure.html', label: 'Trend'    },
   ];
 
   const current = location.pathname.split('/').pop() || 'index.html';
