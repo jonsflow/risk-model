@@ -93,6 +93,16 @@ def classify_structure(points: list) -> tuple:
             last_low  = {'time': p['time'], 'price': p['price'], 'label': label}
         all_pivots.append({'time': p['time'], 'price': p['price'], 'label': label})
 
+    # If the current (last) bar's price breaks above running_high or below running_low,
+    # treat it as an unconfirmed HH/LL for labeling — it's a real new extreme even
+    # though it can't be a confirmed pivot yet (no right-side bar).
+    last_close       = points[-1][1]
+    last_close_time  = points[-1][0]
+    if last_close > running_high:
+        last_high = {'time': last_close_time, 'price': last_close, 'label': 'HH'}
+    elif last_close < running_low:
+        last_low  = {'time': last_close_time, 'price': last_close, 'label': 'LL'}
+
     hl = last_high['label'] if last_high else None
     ll = last_low['label']  if last_low  else None
 

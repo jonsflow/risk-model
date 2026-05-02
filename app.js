@@ -222,10 +222,11 @@ function scoreSymbol(trendStr) {
 function trendSignalLabel(score, maxTotal) {
   const r = score / maxTotal;
   const c = ChartUtils.colors;
-  if (r >= 0.67)  return { label: '🟢 STRONG RISK ON',  color: c.signalStrongOn };
-  if (r >= 0.25)  return { label: '🟡 RISK ON',         color: c.signalOn };
-  if (r >= -0.17) return { label: '⚪ NEUTRAL',          color: c.signalNeutral };
-  if (r >= -0.58) return { label: '🟠 RISK OFF',         color: c.signalOff };
+  // Thresholds based on 7-asset scoring (max ±7): STRONG requires ≥6, ON ≥4, OFF ≤-4, STRONG OFF ≤-6
+  if (r >= 6/7)   return { label: '🟢 STRONG RISK ON',  color: c.signalStrongOn };
+  if (r >= 4/7)   return { label: '🟡 RISK ON',         color: c.signalOn };
+  if (r >= -3/7)  return { label: '⚪ NEUTRAL',          color: c.signalNeutral };
+  if (r >= -5/7)  return { label: '🟠 RISK OFF',         color: c.signalOff };
   return           { label: '🔴 STRONG RISK OFF',        color: c.signalStrongOff };
 }
 
@@ -290,7 +291,7 @@ function renderPressureCard(summary) {
   elLabel.innerHTML = `<span style="color:${color}">${summary.label}</span>`
     + (summary.net_score !== 0 ? ` <span style="font-size:16px">(${sign}${summary.net_score})</span>` : '');
 
-  elScore.textContent = `${summary.bearish_count} bearish · ${summary.bullish_count} bullish`;
+  elScore.textContent = `${summary.bearish_count} bearish · ${summary.bullish_count} bullish (max ±6)`;
 }
 
 function applyDivergenceCache(cache) {
@@ -348,7 +349,7 @@ function applyDivergenceCache(cache) {
     // Per-pair score chips: MA status for each symbol + trend direction score
     const pairScoresEl = document.getElementById(`${pairData.id}-pair-scores`);
     if (pairScoresEl) {
-      const score = scorePair(pairData.trend1, pairData.trend2);
+      const score = scoreSymbol(pairData.trend1) + scoreSymbol(pairData.trend2);
       const sign = score > 0 ? '+' : '';
       const detail1 = riskScore.details.find(d => d.startsWith(pair.symbol1 + ':')) || '';
       const detail2 = riskScore.details.find(d => d.startsWith(pair.symbol2 + ':')) || '';
