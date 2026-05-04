@@ -24,7 +24,14 @@
         <h1 style="margin:0 0 4px 0">Trade Recommendations</h1>
         <div class="muted" id="headerMeta">Loading data…</div>
       </div>
-      <div id="dayQualityBadge" style="font-size: 1.2em; font-weight: bold;"></div>
+      <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 8px;">
+        <div id="dayQualityBadge" style="font-size: 1.2em; font-weight: bold;"></div>
+        <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+          <label for="tradeDatePicker" class="muted" style="font-size: 0.85em;">Date:</label>
+          <input type="date" id="tradeDatePicker" style="background: #22242a; color: #e2e8f0; border: 1px solid #374151; border-radius: 4px; padding: 4px 8px; font-size: 0.85em;">
+          <button id="tradeDateToday" style="background: #374151; color: #e2e8f0; border: none; border-radius: 4px; padding: 4px 10px; font-size: 0.85em; cursor: pointer;">Today</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -40,7 +47,7 @@
 
     <!-- Step 1: Day Quality Gate -->
     <div class="card" id="step-1">
-      <h2>Step 1 — Day Quality Gate</h2>
+      <h2>Step 1 — Day Quality Gate <span style="font-size:0.65em; color:#6b7280; font-weight:normal;">(SPY)</span></h2>
       <div id="step1Content"></div>
     </div>
 

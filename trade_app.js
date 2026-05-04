@@ -6,41 +6,137 @@
 
 let cacheData = null;
 let scoredTrades = null;
+let latestDate = null;
 
 // =============================================================================
 // MAIN ENTRY POINT
 // =============================================================================
 
+function todayET() {
+  // Return today's date string in Eastern Time (YYYY-MM-DD)
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
+}
+
+function isWeekend(dateStr) {
+  // Use noon local time to avoid any DST boundary issues
+  const day = new Date(dateStr + 'T12:00:00').getDay(); // 0=Sun, 6=Sat
+  return day === 0 || day === 6;
+}
+
+function renderAll() {
+  // Ensure all step cards are visible before re-rendering
+  ['step-2','step-3','step-4','step-5','step-6'].forEach(id => {
+    document.getElementById(id).style.display = '';
+  });
+
+  renderHeader();
+  renderDayQuality();
+
+  // Weekend: market closed, nothing more to show
+  if (cacheData.market_closed) {
+    ['step-2','step-3','step-4','step-5','step-6'].forEach(id => {
+      document.getElementById(id).style.display = 'none';
+    });
+    return;
+  }
+
+  // If day grade is C or F, render EOD with what we have and stop morning flow
+  if (['C', 'F'].includes(cacheData.day_quality.grade)) {
+    renderEodOutcomes(null);
+    document.getElementById('step-2').style.display = 'none';
+    document.getElementById('step-3').style.display = 'none';
+    document.getElementById('step-4').style.display = 'none';
+    document.getElementById('step-5').style.display = 'none';
+    document.getElementById('step-6').style.display = 'none';
+    return;
+  }
+
+  // Continue with remaining morning steps, then render EOD with scored data
+  renderRegime();
+  renderPatternScanner();
+  const scored = scoreConfluences();
+  scoredTrades = scored;
+  renderRecommendations(scored);
+  renderPositionCalc(scored);
+  renderEodOutcomes(scored);
+}
+
+function renderWeekend(dateStr) {
+  ['step-2','step-3','step-4','step-5','step-6'].forEach(id =>
+    document.getElementById(id).style.display = 'none');
+  document.getElementById('headerMeta').textContent = dateStr;
+  document.getElementById('dayQualityBadge').innerHTML =
+    `<span style="background: #6b7280; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">Weekend — Market Closed</span>`;
+  document.getElementById('step1Content').innerHTML = `
+    <div style="background: #1e2330; border-left: 4px solid #6b7280; padding: 12px; border-radius: 4px;">
+      <strong style="color: #9ca3af;">Market Closed — Weekend</strong><br>
+      <span class="muted">No grading until Monday.</span>
+    </div>`;
+}
+
+async function loadAndRender(dateStr) {
+  // Handle weekends client-side — no cache file exists or is needed
+  if (isWeekend(dateStr)) {
+    renderWeekend(dateStr);
+    return;
+  }
+
+  const url = (dateStr === latestDate || !dateStr)
+    ? 'data/cache/trading_signals.json'
+    : `data/cache/trading_signals_${dateStr}.json`;
+
+  const response = await fetch(url);
+  if (!response.ok) {
+    if (response.status === 404) {
+      ['step-2','step-3','step-4','step-5','step-6'].forEach(id =>
+        document.getElementById(id).style.display = 'none');
+      document.getElementById('step1Content').innerHTML =
+        `<div style="color: #9ca3af; padding: 12px;">No data available for ${dateStr}.</div>`;
+      return;
+    }
+    throw new Error(`Failed to fetch: ${response.status}`);
+  }
+  cacheData = await response.json();
+  renderAll();
+}
+
 async function main() {
   try {
-    // Fetch cache
+    // Fetch latest cache
     const response = await fetch('data/cache/trading_signals.json');
     if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
     cacheData = await response.json();
 
-    // Render all steps
-    renderHeader();
-    renderDayQuality();
+    latestDate = cacheData.symbols?.SPY?.date || todayET();
+    const today = todayET();
 
-    // If day grade is C or F, render EOD with what we have and stop morning flow
-    if (['C', 'F'].includes(cacheData.day_quality.grade)) {
-      renderEodOutcomes(null);
-      document.getElementById('step-2').style.display = 'none';
-      document.getElementById('step-3').style.display = 'none';
-      document.getElementById('step-4').style.display = 'none';
-      document.getElementById('step-5').style.display = 'none';
-      document.getElementById('step-6').style.display = 'none';
-      return;
+    const picker = document.getElementById('tradeDatePicker');
+    picker.value = today;
+    picker.max = today;
+
+    picker.addEventListener('change', async () => {
+      try {
+        await loadAndRender(picker.value);
+      } catch (error) {
+        console.error('Error loading date:', error);
+        document.getElementById('step1Content').innerHTML =
+          `<div class="error">Error loading data: ${error.message}</div>`;
+      }
+    });
+
+    document.getElementById('tradeDateToday').addEventListener('click', async () => {
+      picker.value = today;
+      await loadAndRender(today);
+    });
+
+    // Initial render: weekend → show closed, weekday → render loaded data or fetch dated file
+    if (isWeekend(today)) {
+      renderWeekend(today);
+    } else if (today === latestDate) {
+      renderAll();
+    } else {
+      await loadAndRender(today);
     }
-
-    // Continue with remaining morning steps, then render EOD with scored data
-    renderRegime();
-    renderPatternScanner();
-    const scored = scoreConfluences();
-    scoredTrades = scored;
-    renderRecommendations(scored);
-    renderPositionCalc(scored);
-    renderEodOutcomes(scored);
 
   } catch (error) {
     console.error('Error:', error);
@@ -57,11 +153,15 @@ function renderHeader() {
   const genStr = gen.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const grade = cacheData.day_quality.grade;
-  const gradeColor = grade === 'A+' || grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = (grade === 'A+' || grade === 'A') ? 'Trading Day' : grade === 'B' ? 'Reduced Size' : 'No Trades';
+  const gradeColor = cacheData.market_closed ? '#6b7280'
+    : grade === 'A+' || grade === 'A' ? '#10b981'
+    : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = cacheData.market_closed ? 'Market Closed'
+    : (grade === 'A+' || grade === 'A') ? 'Trading Day'
+    : grade === 'B' ? 'Reduced Size' : 'No Trades';
 
   document.getElementById('headerMeta').textContent = `as of ${genStr}`;
-  document.getElementById('dayQualityBadge').innerHTML = `<span style="background: ${gradeColor}; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">${grade} — ${gradeLabel}</span>`;
+  document.getElementById('dayQualityBadge').innerHTML = `<span style="background: ${gradeColor}; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">${cacheData.market_closed ? 'Weekend' : grade} — ${gradeLabel}</span>`;
 
   const w = cacheData.windows || {};
   const fmt = (w) => {
@@ -94,56 +194,113 @@ function renderHeader() {
 // =============================================================================
 
 function renderDayQuality() {
-  const grade = cacheData.day_quality.grade;
-  const mods = cacheData.day_quality.modifiers;
+  const grade     = cacheData.day_quality.grade;
+  const scores    = cacheData.day_quality.scores || {};
+  const volRegime = cacheData.vol_regime || {};
 
-  // Check for no-trade condition
-  const isNoTrade = ['C', 'F'].includes(grade);
-
-  let html = `<div style="margin-bottom: 16px;">`;
-
-  if (isNoTrade) {
-    html += `<div style="background: #2a1f1f; border-left: 4px solid #ef4444; padding: 12px; border-radius: 4px; margin-bottom: 16px;">
-      <strong style="color: #991b1b;">🛑 NO TRADES TODAY</strong><br>
-      Grade: <strong>${grade}</strong>`;
-    if (grade === 'F' && Math.abs(mods.prior_day_move_pct) > 10) {
-      html += `<br>Prior day move: ${mods.prior_day_move_pct.toFixed(2)}% (> 10% threshold)`;
-    } else if (grade === 'C') {
-      html += `<br>ATR below average AND volume below 20-day average`;
-    }
-    html += `</div>`;
+  if (cacheData.market_closed) {
+    document.getElementById('step1Content').innerHTML = `
+      <div style="background: #1e2330; border-left: 4px solid #6b7280; padding: 12px; border-radius: 4px;">
+        <strong style="color: #9ca3af;">Market Closed — Weekend</strong><br>
+        <span class="muted">No grading until Monday.</span>
+      </div>`;
+    return;
   }
 
+  const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
+  const scoreDots  = (s) => [0,1,2].map(i =>
+    `<span style="color:${i < s ? scoreColor(s) : '#374151'}">●</span>`
+  ).join('');
+
+  const regimeColors = { Low: '#3b82f6', Normal: '#10b981', Elevated: '#f59e0b', Extreme: '#ef4444' };
+  const regimeColor  = regimeColors[volRegime.label] || '#6b7280';
+
+  const total    = scores.total ?? '–';
+  const max      = scores.max   ?? 8;
+  const hasData  = scores.has_data !== false;
+
+  const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = grade === 'A' ? 'Full Size' : grade === 'B' ? 'Reduced Size' : 'No Trades';
+
+  // RVOL is kept in the model but not displayed — yfinance returns 0 volume for SPY pre-market bars.
+  // If a data source with reliable pre-market volume is added, re-expose scores.rvol here.
+  const range = scores.range     || {};
+  const gap   = scores.gap       || {};
+  const struc = scores.structure || {};
+
+  const noDataMsg = '<span class="muted" style="font-size:0.8em;">No pre-market data</span>';
+  const fmt = (n, suffix='') => n != null ? n + suffix : '–';
+
+  let html = '';
+
+  // Vol regime badge
+  if (volRegime.label) {
+    html += `<div style="margin-bottom: 12px;">
+      <span class="muted" style="margin-right: 8px;">Vol Regime:</span>
+      <span style="background: ${regimeColor}; color: white; padding: 3px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9em;">${volRegime.label}</span>
+      <span class="muted" style="margin-left: 8px; font-size: 0.85em;">${volRegime.atr_percentile_1y}th pct of 1-year ATR range</span>
+    </div>`;
+  }
+
+  // Score summary banner
   html += `
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-      <div class="pill">
-        <div class="muted">ATR Above Avg</div>
-        <span style="font-weight: bold; color: ${mods.atr_above_avg ? '#10b981' : '#ef4444'};">
-          ${mods.atr_above_avg ? '✓' : '✗'}
-        </span>
-        <div class="muted" style="font-size: 0.8em; margin-top: 6px;">Enough range to produce tradeable swings.</div>
-      </div>
-      <div class="pill">
-        <div class="muted">Volume > 20d Avg</div>
-        <span style="font-weight: bold; color: ${mods.volume_above_20d ? '#10b981' : '#ef4444'};">
-          ${mods.volume_above_20d ? '✓' : '✗'}
-        </span>
-        <div class="muted" style="font-size: 0.8em; margin-top: 6px;">Confirms institutional participation.</div>
-      </div>
-      <div class="pill">
-        <div class="muted">Volume > 50d Avg</div>
-        <span style="font-weight: bold; color: ${mods.volume_above_50d ? '#10b981' : '#ef4444'};">
-          ${mods.volume_above_50d ? '✓' : '✗'}
-        </span>
-        <div class="muted" style="font-size: 0.8em; margin-top: 6px;">Both checks passing = A+ conviction day.</div>
-      </div>
+  <div style="background: #1e2330; border-left: 4px solid ${gradeColor}; padding: 12px; border-radius: 4px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center;">
+    <div>
+      <strong style="color: ${gradeColor};">Grade ${grade} — ${gradeLabel}</strong>
+      ${grade === 'C' ? '<br><span class="muted" style="font-size:0.9em;">Score below threshold for active trading</span>' : ''}
     </div>
-    <div class="pill">
-      <div class="muted">Prior Day Move (SPY)</div>
-      <strong>${mods.prior_day_move_pct.toFixed(2)}%</strong>
-      <div class="muted" style="font-size: 0.8em; margin-top: 6px;">&gt;10% = F (no trades). &gt;3% = B (reduced size).</div>
-    </div>
+    <span style="font-size: 1.5em; font-weight: bold; color: ${gradeColor};">${total}/${max}</span>
   </div>`;
+
+  // 3 visible factors: Overnight Range, Gap vs ATR, Structure
+  html += `<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+
+    <div class="pill">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <div class="muted">Overnight Range</div>
+        <span>${scoreDots(range.score ?? 0)}</span>
+      </div>
+      <span style="font-weight:bold; color:${scoreColor(range.score ?? 0)}; font-size:1.1em;">
+        ${fmt(range.ratio, '×')}
+      </span>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">
+        ${range.ratio != null
+          ? `$${range.pm_range_today} today · $${range.pm_range_avg_20d} 20d avg`
+          : noDataMsg}
+      </div>
+    </div>
+
+    <div class="pill">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <div class="muted">Gap vs ATR</div>
+        <span>${scoreDots(gap.score ?? 0)}</span>
+      </div>
+      <span style="font-weight:bold; color:${scoreColor(gap.score ?? 0)}; font-size:1.1em;">
+        ${fmt(gap.ratio, '× gap med')}
+      </span>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">
+        ${gap.gap_pts != null ? `$${gap.gap_pts} gap · median $${gap.median_gap}` : 'No gap data'}
+      </div>
+    </div>
+
+    <div class="pill">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <div class="muted">Structure</div>
+        <span>${scoreDots(struc.score ?? 0)}</span>
+      </div>
+      <span style="font-weight:bold; color:${scoreColor(struc.score ?? 0)}; font-size:1.1em;">
+        ${struc.regime ?? '–'}
+      </span>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">Trending=2 · Ranging=1 · Choppy=0</div>
+    </div>
+
+  </div>`;
+
+  if (!hasData) {
+    html += `<div class="muted" style="font-size:0.8em;">
+      ⚠ No pre-market bars available — Grade based on Gap + Structure only.
+    </div>`;
+  }
 
   document.getElementById('step1Content').innerHTML = html;
 }
@@ -162,9 +319,9 @@ function renderRegime() {
   };
 
   const patternMenu = {
-    'Trending': 'ORB, Gap Continuation, Engulfing (with trend)',
-    'Ranging': 'Gap Fill, Outside Day Reversal, Engulfing at S/R',
-    'Choppy': 'No patterns valid — sit out'
+    'Trending': 'ORB, Gap Fill, Gap Continuation, Engulfing (with trend)',
+    'Ranging':  'Gap Fill, Gap Continuation, Outside Day, Engulfing at S/R',
+    'Choppy':   'No patterns valid — sit out'
   };
 
   let html = `
@@ -209,8 +366,8 @@ function renderPatternScanner() {
   const symbols = cacheData.symbols;
 
   const regimePatterns = {
-    'Trending': ['ORB', 'Gap', 'Engulfing'],
-    'Ranging': ['Gap', 'Outside Day'],
+    'Trending': ['ORB', 'Gap Fill', 'Gap Continuation', 'Engulfing'],
+    'Ranging':  ['Gap Fill', 'Gap Continuation', 'Outside Day', 'Engulfing at S/R'],
     'Choppy': []
   };
 
@@ -220,85 +377,72 @@ function renderPatternScanner() {
 
   if (validPatterns.length === 0) {
     html = `<div style="background: #2a2414; padding: 12px; border-radius: 4px;">No patterns valid for ${regime} regime — sit out.</div>`;
-  } else {
-    // Filter patterns valid for this regime
-    const filtered = patterns.filter(p => validPatterns.some(v => p.pattern.includes(v)));
+    document.getElementById('step3Content').innerHTML = html;
+    return;
+  }
 
-    if (filtered.length === 0) {
-      html = `<div class="muted">No patterns detected today.</div>`;
-    } else {
-      html = `<h3 style="margin-top: 0; color: #10b981;">✓ Patterns Detected</h3>
-      <table style="width: 100%; border-collapse: collapse;">
-        <thead>
-          <tr style="border-bottom: 2px solid #a7a7ad;">
-            <th style="text-align: left; padding: 8px;">Symbol</th>
-            <th style="text-align: left; padding: 8px;">Pattern</th>
-            <th style="text-align: left; padding: 8px;">Direction</th>
-            <th style="text-align: left; padding: 8px;">Notes</th>
-          </tr>
-        </thead>
-        <tbody>`;
+  // Build per-symbol rows: all symbols, sorted by score descending
+  const rows = Object.keys(symbols).map(sym => {
+    const data = symbols[sym];
+    const symPatterns = patterns.filter(p => p.symbol === sym && validPatterns.some(v => p.pattern.includes(v)));
 
-      filtered.forEach(p => {
+    // Simple display score: pattern detected + RSI extreme + PM range active
+    let score = 0;
+    if (symPatterns.length > 0) score += 3;
+    if (data.rsi_14 < 35 || data.rsi_14 > 65) score += 1;
+    if (data.atr_above_avg) score += 1;
+
+    const reasons = [];
+    if (symPatterns.length === 0) {
+      if (!data.gap_significant && !data.outside_day && !(data.patterns && data.patterns.orb_qualified)) {
+        reasons.push('No pattern');
+      }
+      if (data.rsi_14 > 35 && data.rsi_14 < 65) reasons.push('RSI neutral');
+      if (!data.atr_above_avg) reasons.push('PM range below avg');
+      if (data.above_ma_20 === false) reasons.push('Below 20-MA');
+    }
+
+    return { sym, data, symPatterns, score, reasons };
+  }).sort((a, b) => b.score - a.score);
+
+  html = `<table style="width: 100%; border-collapse: collapse;">
+    <thead>
+      <tr style="border-bottom: 2px solid #a7a7ad;">
+        <th style="text-align: left; padding: 8px;">Symbol</th>
+        <th style="text-align: left; padding: 8px;">Pattern</th>
+        <th style="text-align: left; padding: 8px;">Direction</th>
+        <th style="text-align: left; padding: 8px;">Notes</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+  rows.forEach(({ sym, symPatterns, score, reasons }) => {
+    const scoreColor = score >= 4 ? '#10b981' : score >= 2 ? '#f59e0b' : '#6b7280';
+    const scoreBadge = `<span style="background:${scoreColor}; color:white; padding:1px 6px; border-radius:3px; font-size:0.75em; margin-left:4px;">${score}</span>`;
+
+    if (symPatterns.length > 0) {
+      symPatterns.forEach((p, i) => {
         const dirColor = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#6b7280';
-
         html += `
           <tr style="border-bottom: 1px solid #333;">
-            <td style="padding: 8px; font-weight: bold;">${p.symbol}</td>
+            <td style="padding: 8px; font-weight: bold;">${i === 0 ? sym + scoreBadge : ''}</td>
             <td style="padding: 8px;">${p.pattern}</td>
             <td style="padding: 8px; color: ${dirColor}; font-weight: bold;">${p.direction}</td>
             <td style="padding: 8px; font-size: 0.9em;">${p.notes}</td>
           </tr>`;
       });
-
-      html += `</tbody></table>`;
+    } else {
+      html += `
+        <tr style="border-bottom: 1px solid #333; color: #6b7280;">
+          <td style="padding: 8px; font-weight: bold;">${sym}${scoreBadge}</td>
+          <td style="padding: 8px;">—</td>
+          <td style="padding: 8px;">—</td>
+          <td style="padding: 8px; font-size: 0.9em;">${reasons.join(' · ') || '—'}</td>
+        </tr>`;
     }
+  });
 
-    // Show what's NOT in play
-    html += `<h3 style="margin-top: 24px; color: #a7a7ad;">✗ No Patterns — Why</h3>`;
-    html += `<table style="width: 100%; border-collapse: collapse;">
-      <thead>
-        <tr style="border-bottom: 2px solid #a7a7ad;">
-          <th style="text-align: left; padding: 8px;">Symbol</th>
-          <th style="text-align: left; padding: 8px;">Reason</th>
-        </tr>
-      </thead>
-      <tbody>`;
-
-    const patternsSymbols = new Set(patterns.map(p => p.symbol));
-    const allSymbolsToShow = Object.keys(symbols);
-
-    allSymbolsToShow.forEach(sym => {
-      if (symbols[sym] && !patternsSymbols.has(sym)) {
-        const data = symbols[sym];
-        const reasons = [];
-
-        if (!data.gap_significant && !data.outside_day && !data.patterns.orb_qualified) {
-          reasons.push('No pattern detected');
-        }
-        if (data.rsi_14 > 35 && data.rsi_14 < 65) {
-          reasons.push('RSI neutral (35-65)');
-        }
-        if (!data.atr_above_avg) {
-          reasons.push('ATR below avg');
-        }
-        if (data.above_ma_20 === false && data.ma_20) {
-          reasons.push('Price below 20-MA');
-        }
-
-        if (reasons.length > 0) {
-          html += `
-            <tr style="border-bottom: 1px solid #333; color: #6b7280;">
-              <td style="padding: 8px; font-weight: bold;">${sym}</td>
-              <td style="padding: 8px; font-size: 0.9em;">${reasons.join(' • ')}</td>
-            </tr>`;
-        }
-      }
-    });
-
-    html += `</tbody></table>`;
-  }
-
+  html += `</tbody></table>`;
   document.getElementById('step3Content').innerHTML = html;
 }
 
@@ -337,8 +481,8 @@ function scoreConfluences() {
   const regime = cacheData.regime.label;
 
   const regimePatterns = {
-    'Trending': ['ORB', 'Gap', 'Engulfing'],
-    'Ranging': ['Gap', 'Outside Day'],
+    'Trending': ['ORB', 'Gap Fill', 'Gap Continuation', 'Engulfing'],
+    'Ranging':  ['Gap Fill', 'Gap Continuation', 'Outside Day', 'Engulfing at S/R'],
     'Choppy': []
   };
 
@@ -358,7 +502,7 @@ function scoreConfluences() {
       let score = 0;
       const checks = {
         'Volume > 20d avg':  !!data.volume_above_20d,
-        'ATR above avg':     !!data.atr_above_avg,
+        'PM range active':   !!data.atr_above_avg,
         'RSI extreme':       (data.rsi_14 < 35) || (data.rsi_14 > 65),
         'MACD aligned':      p.direction === 'up' ? data.macd_histogram > 0 : data.macd_histogram < 0,
         'MA(20) aligned':    p.direction === 'up' ? !!data.above_ma_20 : !data.above_ma_20,
@@ -454,22 +598,30 @@ function renderRecommendations(scored) {
       const atrStop = atr.toFixed(2);
       const dir = isUp ? '+' : '−';
 
-      if (trade.pattern === 'ORB') {
+      const pat = trade.pattern;
+      if (pat.includes('Gap Fill')) {
+        const orbEntry = pat.includes('ORB');
+        entry   = orbEntry
+          ? `${isUp ? 'Short' : 'Buy'} ORB breakout — fade gap to prior close`
+          : `${isUp ? 'Short at open' : 'Buy at open'} — fade gap to prior close`;
+        stop    = `${isUp ? '+' : '−'}$${atrStop} from entry (1x ATR)`;
+        target1 = `Prior close $${(trade.data.close).toFixed(2)} (gap fill)`;
+        target2 = `${dir}$${atrT1} from entry (1.5x ATR)`;
+        target3 = `Trailing $${atrStop} (1x ATR)`;
+      } else if (pat.includes('Gap Continuation')) {
+        const orbEntry = pat.includes('ORB');
+        entry   = orbEntry
+          ? `${isUp ? 'Buy' : 'Short'} ORB breakout — continuation`
+          : `${isUp ? 'Buy on open momentum' : 'Short on open momentum'} — gap continuation`;
+        stop    = `${isUp ? '−' : '+'}$${atrStop} from entry (1x ATR)`;
+        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
+        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
+        target3 = `Trailing $${atrStop} (1x ATR)`;
+      } else if (pat === 'ORB') {
         entry   = `ORB in play — watch for breakout 10:00–11:30 AM`;
         stop    = `Opposite side of opening range`;
         target1 = `$${atrT1} from entry (1.5x ATR)`;
         target2 = `$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrStop} (1x ATR)`;
-      } else if (trade.pattern === 'Gap') {
-        if (regime === 'Trending') {
-          entry   = isUp ? `Buy on open momentum — gap continuation` : `Short on open momentum — gap continuation`;
-          stop    = `${isUp ? '−' : '+'}$${atrStop} from entry (1x ATR)`;
-        } else {
-          entry   = isUp ? `Short at open — fade gap to fill` : `Buy at open — fade gap to fill`;
-          stop    = `${isUp ? '+' : '−'}$${atrStop} from entry (1x ATR)`;
-        }
-        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
         target3 = `Trailing $${atrStop} (1x ATR)`;
       } else if (trade.pattern === 'Outside Day') {
         // Tomorrow's trigger levels are today's known high/low
@@ -689,18 +841,19 @@ function renderEodOutcomes(scored) {
   let html = '';
 
   // ── SECTION 1: DAY QUALITY ──────────────────────────────────────────────
-  const grade = cacheData.day_quality.grade;
-  const mods  = cacheData.day_quality.modifiers;
-  const gradeColor = grade === 'A+' || grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = (grade === 'A+' || grade === 'A') ? 'Tradeable day' : grade === 'B' ? 'Reduced size' : 'No trades';
+  const grade  = cacheData.day_quality.grade;
+  const scores = cacheData.day_quality.scores || {};
+  const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = grade === 'A' ? 'Full Size' : grade === 'B' ? 'Reduced Size' : 'No Trades';
+  const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
 
   let dqBody = `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
-    ${pill('Day Grade', grade, gradeColor, gradeLabel)}
-    ${pill('ATR vs Avg', mods.atr_above_avg ? 'Above ✓' : 'Below ✗', mods.atr_above_avg ? '#10b981' : '#ef4444', null)}
-    ${pill('Vol > 20d', mods.volume_above_20d ? 'Yes ✓' : 'No ✗', mods.volume_above_20d ? '#10b981' : '#6b7280', null)}
-    ${pill('Vol > 50d', mods.volume_above_50d ? 'Yes ✓' : 'No ✗', mods.volume_above_50d ? '#10b981' : '#6b7280', null)}
+    ${pill('Day Grade', `${grade} (${scores.total ?? '–'}/${scores.max ?? 6})`, gradeColor, gradeLabel)}
+    ${pill('PM Range', scores.range?.ratio != null ? scores.range.ratio + '×' : '–', scoreColor(scores.range?.score ?? 0), null)}
+    ${pill('Gap vs ATR', scores.gap?.ratio != null ? scores.gap.ratio + '×' : '–', scoreColor(scores.gap?.score ?? 0), null)}
+    ${pill('Structure', scores.structure?.regime ?? '–', scoreColor(scores.structure?.score ?? 0), null)}
   </div>`;
-  if (['C', 'F'].includes(grade)) {
+  if (grade === 'C') {
     dqBody += `<div style="margin-top:10px; color:#ef4444; font-size:0.9em;">No trades taken — day did not meet quality gate.</div>`;
   }
   html += sec('1 — Day Quality', dqBody);
@@ -709,8 +862,8 @@ function renderEodOutcomes(scored) {
   const regime = cacheData.regime;
   const regimeColors = { 'Trending': '#3b82f6', 'Ranging': '#f59e0b', 'Choppy': '#ef4444' };
   const patternMenus = {
-    'Trending': 'ORB, Gap Continuation, Engulfing (with trend)',
-    'Ranging':  'Gap Fill, Outside Day, Engulfing at S/R',
+    'Trending': 'ORB, Gap Fill, Gap Continuation, Engulfing (with trend)',
+    'Ranging':  'Gap Fill, Gap Continuation, Outside Day, Engulfing at S/R',
     'Choppy':   'No patterns — sit out'
   };
   const rCol = regimeColors[regime.label] || '#6b7280';
