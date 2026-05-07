@@ -79,30 +79,67 @@ def get_symbols_from_macro_config(macro_config):
     return symbols, ticker_map
 
 def fetch_hourly(symbol, ticker_map, data_dir):
-    """Fetch hourly data (last 1 month)"""
+    """Fetch hourly data — incremental if existing CSV present, else last 1 month.
+
+    Existing rows are preserved and new bars are appended, so history accumulates
+    across runs rather than being limited to yfinance's 1-month window.
+    """
+    csv_path = data_dir / f'{symbol.lower()}_hourly.csv'
+
+    # Read last datetime from file to know where to start the fetch
+    last_dt_str = None
+    existing_lines = None
+    if csv_path.exists():
+        try:
+            with open(csv_path, 'r') as f:
+                existing_lines = f.readlines()
+            if len(existing_lines) > 1:
+                parts = existing_lines[-1].split(',')
+                last_dt_str = f"{parts[0].strip()} {parts[1].strip()}"  # "YYYY-MM-DD HH:MM:SS"
+        except Exception:
+            pass
+
     ticker_symbol = ticker_map.get(symbol, symbol)
     ticker = yf.Ticker(ticker_symbol)
-    df = ticker.history(period='1mo', interval='1h')
+
+    if last_dt_str:
+        # Fetch from last known date — yfinance 1h has a ~730-day limit with start=
+        from datetime import datetime
+        start_date = datetime.strptime(last_dt_str, '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d')
+        df = ticker.history(start=start_date, interval='1h', prepost=True)
+    else:
+        df = ticker.history(period='1mo', interval='1h', prepost=True)
 
     if df.empty:
         print(f"WARNING: No hourly data returned for {symbol}", file=sys.stderr)
         return
 
-    # Reset index to get Datetime as a column
     df = df.reset_index()
-
-    # Convert datetime to separate Date and Time columns
     df['Date'] = df['Datetime'].dt.strftime('%Y-%m-%d')
     df['Time'] = df['Datetime'].dt.strftime('%H:%M:%S')
+    new_df = df[['Date', 'Time', 'Open', 'High', 'Low', 'Close', 'Volume']]
 
-    # Format: Date,Time,Open,High,Low,Close,Volume
-    output_df = df[['Date', 'Time', 'Open', 'High', 'Low', 'Close', 'Volume']]
-
-    # Save to *_hourly.csv
-    csv_path = data_dir / f'{symbol.lower()}_hourly.csv'
-    output_df.to_csv(csv_path, index=False)
-
-    print(f"✓ {symbol} hourly: {len(output_df)} bars → {csv_path}", file=sys.stderr)
+    if last_dt_str and existing_lines:
+        # Drop overlap: keep existing rows strictly before the first new bar's datetime
+        first_new_dt = f"{new_df['Date'].iloc[0]} {new_df['Time'].iloc[0]}"
+        header = existing_lines[0]
+        kept = [l for l in existing_lines[1:]
+                if f"{l.split(',')[0].strip()} {l.split(',')[1].strip()}" < first_new_dt]
+        new_csv = new_df.to_csv(index=False, header=False)
+        with open(csv_path, 'w') as f:
+            f.write(header)
+            f.writelines(kept)
+            f.write(new_csv)
+        total = len(kept) + len(new_df)
+        genuinely_new = sum(1 for _, r in new_df.iterrows()
+                            if f"{r['Date']} {r['Time']}" > last_dt_str)
+        if genuinely_new:
+            print(f"✓ {symbol} hourly: +{genuinely_new} new bars (total {total}) → {csv_path}", file=sys.stderr)
+        else:
+            print(f"✓ {symbol} hourly: up to date ({total} bars) → {csv_path}", file=sys.stderr)
+    else:
+        new_df.to_csv(csv_path, index=False)
+        print(f"✓ {symbol} hourly: {len(new_df)} bars → {csv_path}", file=sys.stderr)
 
 def fetch_daily(symbol, ticker_map, data_dir):
     """Fetch daily data — incremental if existing CSV present, else full max history.

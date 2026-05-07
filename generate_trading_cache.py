@@ -22,6 +22,7 @@ Uses stdlib only — no new dependencies beyond what fetch_data.py requires.
 import csv
 import json
 import math
+import statistics
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -702,68 +703,193 @@ def calculate_eod_outcomes(points: list, hourly_points: list, gap: dict, atr_14:
 # DAY QUALITY GRADING
 # =============================================================================
 
-def grade_day_quality(points: list, atr_current: float, atr_20day_avg: float,
-                      volume_20day_avg: float, volume_50day_avg: float) -> str:
+def percentile_rank(series: list, value: float) -> float:
     """
-    Grade today's trading day quality: A+, A, B, C, or F
+    Return the percentile rank of `value` within `series` (0–100).
+    Equivalent to IV Rank: what % of historical values is `value` above?
+    """
+    if not series:
+        return 50.0
+    return round(sum(1 for x in series if x <= value) / len(series) * 100, 1)
 
-    Rules (from trading-rules.md):
-    F  → prior day move > 10%
-    C  → ATR below 20-day avg AND volume below 50-day avg
-    B  → mixed signals (ATR ok but volume low, or vice versa)
-    A  → ATR above avg AND volume above avg AND prior move < 3%
-    A+ → all A conditions + price above rising MA(20)
+
+def _premarket_no_data() -> dict:
+    return {
+        'rvol':  {'score': 0, 'ratio': None, 'pm_vol_today': None, 'pm_vol_avg_20d': None},
+        'range': {'score': 0, 'ratio': None, 'pm_range_today': None, 'pm_range_avg_20d': None},
+        'has_data': False,
+    }
+
+
+def compute_premarket_metrics(hourly_points: list, target_date) -> dict:
+    """
+    Compute pre-market RVOL and overnight range for target_date vs 20-day averages.
+    Pre-market window: 08:00–09:29 ET (stored as UTC in CSV).
+    Returns dict with scores (0/1/2) and raw values for UI display.
+    """
+    if not hourly_points or target_date is None:
+        return _premarket_no_data()
+
+    # Group pre-market bars (08:00–09:29) by date
+    pm_by_date = {}
+    for ts, ohlcv in hourly_points:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        hhmm = dt.hour * 100 + dt.minute
+        if 800 <= hhmm < 930:
+            d = dt.date()
+            pm_by_date.setdefault(d, []).append(ohlcv)
+
+    today_bars = pm_by_date.get(target_date, [])
+    if not today_bars:
+        return _premarket_no_data()
+
+    pm_vol_today   = sum(b['volume'] for b in today_bars)
+    pm_high_today  = max(b['high']   for b in today_bars)
+    pm_low_today   = min(b['low']    for b in today_bars)
+    pm_range_today = pm_high_today - pm_low_today
+
+    # 20-day historical averages (exclude target_date)
+    hist_dates = sorted(d for d in pm_by_date if d < target_date)[-20:]
+    if not hist_dates:
+        return _premarket_no_data()
+
+    hist_vols   = [sum(b['volume'] for b in pm_by_date[d]) for d in hist_dates]
+    hist_ranges = [max(b['high'] for b in pm_by_date[d]) - min(b['low'] for b in pm_by_date[d])
+                   for d in hist_dates]
+
+    avg_vol   = sum(hist_vols)   / len(hist_vols)
+    avg_range = statistics.median(hist_ranges)
+
+    # RVOL requires non-zero historical volume to be meaningful
+    has_rvol  = avg_vol > 0 and pm_vol_today > 0
+    has_range = avg_range > 0 and pm_range_today > 0
+
+    rvol        = round(pm_vol_today   / avg_vol,   2) if has_rvol  else None
+    range_ratio = round(pm_range_today / avg_range, 2) if has_range else None
+
+    rvol_score  = (2 if rvol >= 1.5       else (1 if rvol >= 0.8       else 0)) if has_rvol  else 0
+    range_score = (2 if range_ratio > 1.3 else (1 if range_ratio >= 0.7 else 0)) if has_range else 0
+
+    return {
+        'rvol':  {'score': rvol_score,  'ratio': rvol,
+                  'pm_vol_today': pm_vol_today if has_rvol else None,
+                  'pm_vol_avg_20d': round(avg_vol) if has_rvol else None},
+        'range': {'score': range_score, 'ratio': range_ratio,
+                  'pm_range_today': round(pm_range_today, 2) if has_range else None,
+                  'pm_range_avg_20d': round(avg_range, 2) if has_range else None},
+        'has_data': has_rvol or has_range,
+        'has_rvol': has_rvol,
+        'has_range': has_range,
+    }
+
+
+def grade_day_quality(points: list, hourly_points: list, target_date, regime_label: str) -> tuple:
+    """
+    Grade the trading day using a 4-factor pre-market scoring model (0–8 pts).
+    Reference: docs/day-quality-grading.md
+
+    points        — daily bars through T-1 (prior complete day — pass points[:-1] from caller)
+    hourly_points — all available hourly bars (pre-market window filtered internally)
+    target_date   — the trading date being graded (date object)
+    regime_label  — 'Trending' | 'Ranging' | 'Choppy'
+
+    Returns (grade, scores_dict)
+    Grades: 'A' (7–8 pts), 'B' (5–6 pts), 'C' (0–4 pts)
     """
     if len(points) < 2:
-        return 'B'
+        return 'B', {'total': 4, 'max': 8, 'has_data': False}
 
-    today = points[-1][1]
-    prev = points[-2][1]
+    prior_close = points[-1][1]['close']
+    atr_vals    = calculate_atr(points, 14)
+    atr_14      = atr_vals[-1][1] if atr_vals else 0.0
 
-    prior_move_pct = abs((today['close'] - prev['close']) / prev['close']) * 100 if prev['close'] != 0 else 0
+    # Factors 1 + 2: Pre-market RVOL and Overnight Range
+    pm = compute_premarket_metrics(hourly_points, target_date)
+    rvol_score  = pm['rvol']['score']
+    range_score = pm['range']['score']
 
-    if prior_move_pct > 10.0:
-        return 'F'
+    # Factor 3: Gap vs median overnight gap
+    # Historical overnight gaps: |open[T] - close[T-1]| for last 20 complete days
+    hist_overnight_gaps = [
+        abs(points[i][1]['open'] - points[i-1][1]['close'])
+        for i in range(max(1, len(points) - 20), len(points))
+    ]
+    median_overnight_gap = statistics.median(hist_overnight_gaps) if hist_overnight_gaps else 0.0
 
-    atr_above = atr_current > atr_20day_avg
-    volume_above_20 = today['volume'] > volume_20day_avg if volume_20day_avg > 0 else False
-    volume_above_50 = today['volume'] > volume_50day_avg if volume_50day_avg > 0 else False
+    # 9:30 RTH open — consistent with daily CSV open used in historical gap calculation
+    est_open = None
+    for ts, ohlcv in hourly_points:
+        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        if dt.date() == target_date and dt.hour * 100 + dt.minute == 930:
+            est_open = ohlcv['open']
+            break
+    if est_open is None:  # fallback: first bar of day
+        for ts, ohlcv in hourly_points:
+            if datetime.fromtimestamp(ts, tz=timezone.utc).date() == target_date:
+                est_open = ohlcv['open']
+                break
 
-    if not atr_above and not volume_above_50:
-        return 'C'
+    gap_pts   = abs(est_open - prior_close) if est_open is not None else 0.0
+    gap_ratio = round(gap_pts / median_overnight_gap, 2) if median_overnight_gap > 0 else 0.0
+    gap_score = 2 if gap_ratio > 1.5 else (1 if gap_ratio >= 0.5 else 0)
 
-    if atr_above and volume_above_50 and prior_move_pct < 3.0:
-        # A+: additionally require price above a rising 20-day MA
-        ma20_values = calculate_moving_average(points, 20)
-        if len(ma20_values) >= 10:
-            ma20_now = ma20_values[-1][1]
-            ma20_ten_ago = ma20_values[-10][1]
-            if today['close'] > ma20_now and ma20_now > ma20_ten_ago:
-                return 'A+'
-        return 'A'
+    # Factor 4: Structure Clarity
+    structure_score = {'Trending': 2, 'Ranging': 1, 'Choppy': 0}.get(regime_label, 1)
 
-    if atr_above and volume_above_50:
-        return 'A'
+    total = rvol_score + range_score + gap_score + structure_score
 
-    return 'B'
+    # Grade against available max — only count factors we actually have data for
+    avail_max = 4  # gap + structure always available
+    if pm.get('has_rvol'):  avail_max += 2
+    if pm.get('has_range'): avail_max += 2
+    grade = 'A' if total >= round(avail_max * 0.75) else ('B' if total >= round(avail_max * 0.5) else 'C')
 
-def apply_weekday_modifier(grade: str, timestamp: int) -> str:
+    scores = {
+        'total': total,
+        'max':   avail_max,
+        'rvol':      {**pm['rvol'],  'score': rvol_score},
+        'range':     {**pm['range'], 'score': range_score},
+        'gap':       {
+            'score': gap_score, 'ratio': gap_ratio,
+            'gap_pts': round(gap_pts, 2), 'median_gap': round(median_overnight_gap, 2),
+            'prior_close': round(prior_close, 2),
+            'est_open': round(est_open, 2) if est_open is not None else None,
+        },
+        'structure': {'score': structure_score, 'regime': regime_label},
+        'has_data':  pm['has_data'],
+        'has_rvol':  pm.get('has_rvol', False),
+        'has_range': pm.get('has_range', False),
+    }
+    return grade, scores
+
+
+def classify_vol_regime(points: list, atr_current: float) -> dict:
     """
-    Apply weekday modifier to grade: Mon/Fri grade down 1 level
+    Classify volatility regime using ATR percentile over 1-year lookback.
+    Analogous to VIX percentile / vol regime used by institutional desks.
+
+    Regimes:
+      Low      → ATR pct < 25  (compressed vol, mean-reversion setups)
+      Normal   → ATR pct 25–60 (standard trending/ranging conditions)
+      Elevated → ATR pct 60–85 (momentum/breakout setups favored)
+      Extreme  → ATR pct > 85  (reduce size, wider stops, expect whipsaws)
     """
-    dt = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-    weekday = dt.weekday()  # 0=Mon, 4=Fri
+    atr_vals = calculate_atr(points, 14)
+    atr_series = [v[1] for v in atr_vals[:-1]]  # exclude today
+    lookback = atr_series[-252:] if len(atr_series) >= 252 else atr_series
 
-    if weekday == 0 or weekday == 4:  # Monday or Friday
-        grade_order = ['F', 'C', 'B', 'A', 'A+']
-        try:
-            idx = grade_order.index(grade)
-            if idx > 0:
-                return grade_order[idx - 1]
-        except ValueError:
-            pass
+    pct = percentile_rank(lookback, atr_current)
 
-    return grade
+    if pct > 85:
+        label = 'Extreme'
+    elif pct > 60:
+        label = 'Elevated'
+    elif pct >= 25:
+        label = 'Normal'
+    else:
+        label = 'Low'
+
+    return {'label': label, 'atr_percentile_1y': pct}
 
 # =============================================================================
 # REGIME DETECTION
@@ -840,7 +966,7 @@ def detect_regime(symbols: list, daily_data: dict, hourly_data: dict) -> dict:
 # MAIN GENERATION
 # =============================================================================
 
-def generate_trading_signals():
+def generate_trading_signals(target_date=None):
     """Generate trading signals cache file"""
     trading_symbols, regime_symbols, ticker_map = load_trading_config()
     symbols = trading_symbols
@@ -852,20 +978,38 @@ def generate_trading_signals():
 
     now_utc = datetime.now(timezone.utc)
 
-    output = {
-        'generated': now_utc.isoformat(),
-        'day_quality': {},
-        'regime': {},
-        'symbols': {},
-        'active_patterns': []
-    }
-
     # Load all daily data first
     daily_data = {}
     hourly_data = {}
     for symbol in symbols:
         daily_data[symbol] = load_daily_csv(symbol)
         hourly_data[symbol] = load_hourly_csv(symbol)
+
+    # Slice data to target_date if provided
+    if target_date:
+        target_ts = int(datetime(target_date.year, target_date.month, target_date.day,
+                                 tzinfo=timezone.utc).timestamp())
+        for symbol in symbols:
+            daily_data[symbol] = [p for p in daily_data[symbol] if p[0] <= target_ts]
+            # For hourly: include bars up to end of target day (next day midnight)
+            next_day_ts = target_ts + 86400
+            hourly_data[symbol] = [p for p in hourly_data[symbol] if p[0] < next_day_ts]
+
+    # Determine market_closed from the data date (SPY's last bar after slicing).
+    # Using the data date — not the clock — means a Saturday run correctly marks
+    # Friday's data as a trading day.
+    spy_last = daily_data.get('SPY', [])
+    data_day = datetime.fromtimestamp(spy_last[-1][0], tz=timezone.utc).date() if spy_last else now_utc.date()
+    is_weekend = data_day.weekday() >= 5
+
+    output = {
+        'generated': now_utc.isoformat(),
+        'market_closed': is_weekend,
+        'day_quality': {},
+        'regime': {},
+        'symbols': {},
+        'active_patterns': []
+    }
 
     # Derive actual data windows from SPY (representative symbol)
     def bar_time(bars, idx):
@@ -874,9 +1018,12 @@ def generate_trading_signals():
             return None
         return datetime.fromtimestamp(bars[idx][0], tz=timezone.utc).strftime('%H:%M')
 
-    spy_hourly = hourly_data.get('SPY', [])
-    spy_daily  = daily_data.get('SPY', [])
-    spy_date   = datetime.fromtimestamp(spy_daily[-1][0], tz=timezone.utc).date() if spy_daily else None
+    spy_hourly    = hourly_data.get('SPY', [])
+    spy_daily     = daily_data.get('SPY', [])
+    daily_latest  = datetime.fromtimestamp(spy_daily[-1][0],  tz=timezone.utc).date() if spy_daily  else None
+    hourly_latest = datetime.fromtimestamp(spy_hourly[-1][0], tz=timezone.utc).date() if spy_hourly else None
+    # Use hourly date when newer (morning run: daily=T-1, hourly has T bars)
+    spy_date = hourly_latest if (hourly_latest and daily_latest and hourly_latest > daily_latest) else daily_latest
     pm_bars    = get_session_bars(spy_hourly, 800,  930,  target_date=spy_date)
     orb_bars   = get_session_bars(spy_hourly, 930,  1030, target_date=spy_date)
     sess_bars  = get_session_bars(spy_hourly, 930,  1600, target_date=spy_date)
@@ -888,6 +1035,8 @@ def generate_trading_signals():
         'session':       {'from': bar_time(sess_bars, 0),  'to': bar_time(sess_bars, -1)},
         'last_hour':     {'from': bar_time(lh_bars,   0),  'to': bar_time(lh_bars,   -1)},
     }
+
+    output['regime'] = detect_regime(regime_symbols, daily_data, hourly_data)
 
     # Process each symbol
     for symbol in symbols:
@@ -928,8 +1077,33 @@ def generate_trading_signals():
         premarket_bars = get_session_bars(hourly, 800, 930, target_date=today_date) if hourly else []
         last_hour_bars = get_session_bars(hourly, 1500, 1600, target_date=today_date) if hourly else []
 
+        # Pre-market range activity — use PM range ratio when hourly available, else fall back to daily ATR
+        pm_sym = compute_premarket_metrics(hourly, today_date) if hourly else None
+        if pm_sym and pm_sym.get('has_range'):
+            pm_range_active = pm_sym['range']['ratio'] >= 0.7
+        else:
+            pm_range_active = atr_current > atr_20day_avg
+
         # Pattern detection
+        # Per-symbol median overnight gap: |open[T] - close[T-1]| for last 20 complete days
+        _hist_gaps = [
+            abs(points[i][1]['open'] - points[i-1][1]['close'])
+            for i in range(max(1, len(points) - 20), len(points))
+        ]
+        symbol_median_overnight_gap = statistics.median(_hist_gaps) if _hist_gaps else 0.0
+
         gap = detect_gap(points)
+        if symbol_median_overnight_gap > 0:
+            gap_pts_dollar = abs(points[-1][1]['open'] - points[-2][1]['close'])
+            gap_sig_overnight   = gap_pts_dollar >= 0.5 * symbol_median_overnight_gap
+            gap_strong_overnight = gap_pts_dollar >= 1.5 * symbol_median_overnight_gap
+            gap = {**gap,
+                   'gap_significant': gap_sig_overnight,
+                   'gap_strong': gap_strong_overnight,
+                   'median_overnight_gap': round(symbol_median_overnight_gap, 2)}
+        else:
+            gap = {**gap, 'median_overnight_gap': None}
+
         outside_day_dir = detect_outside_day(points)
         outside_day = outside_day_dir in ['up', 'down']
         opening_range = calculate_opening_range(hourly) if hourly else 0.0
@@ -942,16 +1116,16 @@ def generate_trading_signals():
 
         # Day quality (first symbol sets day grade)
         if symbol == 'SPY':
-            day_grade = grade_day_quality(points, atr_current, atr_20day_avg, volume_20day_avg, volume_50day_avg)
-            day_grade = apply_weekday_modifier(day_grade, today_ts)
-            output['day_quality']['grade'] = day_grade
-            vol_above_50d = today_ohlcv['volume'] > volume_50day_avg
-            output['day_quality']['modifiers'] = {
-                'atr_above_avg': atr_current > atr_20day_avg,
-                'volume_above_20d': (today_ohlcv['volume'] > volume_20day_avg) or vol_above_50d,
-                'volume_above_50d': vol_above_50d,
-                'prior_day_move_pct': gap['gap_pct']
-            }
+            if is_weekend:
+                output['day_quality'] = {'grade': 'N/A', 'scores': {}}
+            else:
+                regime_label = output['regime'].get('label', 'Ranging')
+                # points[:-1] = daily data through T-1 (morning perspective, excludes today's close)
+                day_grade, scores = grade_day_quality(
+                    points[:-1], hourly_data.get('SPY', []), spy_date, regime_label
+                )
+                output['day_quality'] = {'grade': day_grade, 'scores': scores}
+            output['vol_regime'] = classify_vol_regime(points, atr_current)
 
         # Store symbol data
         output['symbols'][symbol] = {
@@ -963,7 +1137,7 @@ def generate_trading_signals():
             'volume': today_ohlcv['volume'],
             'atr_14': round(atr_current, 2),
             'atr_20d_avg': round(atr_20day_avg, 2),
-            'atr_above_avg': atr_current > atr_20day_avg,
+            'atr_above_avg': pm_range_active,
             'rsi_14': round(rsi_current, 1),
             'macd_line': round(macd_line_val, 4),
             'macd_signal': round(macd_signal_val, 4),
@@ -974,12 +1148,13 @@ def generate_trading_signals():
             'gap_type': gap['gap_type'],
             'gap_significant': gap['gap_significant'],
             'gap_strong': gap['gap_strong'],
+            'median_overnight_gap': gap.get('median_overnight_gap'),
             'outside_day': outside_day,
             'outside_day_direction': outside_day_dir,
             'patterns': {
                 'orb_qualified': orb_qualified,
-                'gap_fill_candidate': gap['gap_significant'] and gap['gap_type'] in ['up', 'down'],
-                'gap_continuation_candidate': gap['gap_strong'] and gap['gap_type'] in ['up', 'down'],
+                'gap_fill_candidate': gap['gap_significant'] and gap['gap_type'] != 'none',
+                'gap_continuation_candidate': gap['gap_strong'] and gap['gap_type'] != 'none',
                 'outside_day': outside_day
             },
             'engulfing': engulfing,
@@ -1000,53 +1175,110 @@ def generate_trading_signals():
         }
 
         # Track active patterns (include pre-computed levels + outcome for EOD review)
-        if orb_qualified:
+        # Determine ORB status for this symbol
+        orb_has_levels = orb_qualified and opening_range > 0
+        orb_watch = (not orb_has_levels) and output['regime'].get('label', 'Ranging') == 'Trending' and pm_range_active
+
+        # Determine gap pattern type (one per symbol, regime-qualified)
+        gap_pattern_name = None
+        gap_direction = None
+        gap_notes = None
+        gap_levels = None
+        if gap['gap_significant'] and gap['gap_type'] != 'none':
+            market_regime = output['regime'].get('label', 'Ranging')
+            is_up_gap = gap['gap_type'] == 'up'
+            prev_close_val = round(points[-2][1]['close'], 2)
+            today_open_val = round(today_ohlcv['open'], 2)
+            gap_pts_abs = abs(today_open_val - prev_close_val)
+            mult = 1 if is_up_gap else -1
+            ratio_str = f"{gap_pts_abs / symbol_median_overnight_gap:.1f}× median"
+
+            if gap['gap_strong'] and market_regime == 'Trending':
+                gap_pattern_name = 'Gap Continuation'
+                gap_direction = gap['gap_type']
+                gap_notes = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · Trending"
+                gap_levels = {
+                    'prev_close':      prev_close_val,
+                    'today_open':      today_open_val,
+                    't1_continuation': round(today_open_val + 1.5 * atr_current * mult, 2),
+                    't2_continuation': round(today_open_val + 2.0 * atr_current * mult, 2),
+                    'atr': round(atr_current, 2),
+                }
+            else:
+                gap_pattern_name = 'Gap Fill'
+                gap_direction = 'down' if is_up_gap else 'up'
+                gap_notes = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · {market_regime}"
+                gap_levels = {
+                    'prev_close':      prev_close_val,
+                    'today_open':      today_open_val,
+                    'fill_target':     prev_close_val,
+                    't1_continuation': round(today_open_val + 1.5 * atr_current * mult, 2),
+                    'atr': round(atr_current, 2),
+                }
+
+        # Emit patterns — combine ORB + gap into one entry when both apply
+        if orb_has_levels:
+            # EOD run: opening range known — ORB standalone with full levels
             orb_h = eod_outcome.get('orb_high') or 0.0
             orb_l = eod_outcome.get('orb_low') or 0.0
+            orb_levels = {
+                'orb_high': eod_outcome.get('orb_high'),
+                'orb_low':  eod_outcome.get('orb_low'),
+                't1_up':    round(orb_h + 1.5 * atr_current, 2) if orb_h else None,
+                't1_down':  round(orb_l - 1.5 * atr_current, 2) if orb_l else None,
+                't2_up':    round(orb_h + 2.0 * atr_current, 2) if orb_h else None,
+                't2_down':  round(orb_l - 2.0 * atr_current, 2) if orb_l else None,
+                'atr': round(atr_current, 2),
+            }
+            if gap_levels:
+                orb_levels.update({k: v for k, v in gap_levels.items() if k not in orb_levels})
             output['active_patterns'].append({
                 'symbol': symbol,
-                'pattern': 'ORB',
-                'direction': 'watch',
-                'notes': f"ATR {atr_current:.2f} > avg {atr_20day_avg:.2f}, range {opening_range:.2f}",
-                'levels': {
-                    'orb_high': eod_outcome.get('orb_high'),
-                    'orb_low': eod_outcome.get('orb_low'),
-                    't1_up':   round(orb_h + 1.5 * atr_current, 2) if orb_h else None,
-                    't1_down': round(orb_l - 1.5 * atr_current, 2) if orb_l else None,
-                    't2_up':   round(orb_h + 2.0 * atr_current, 2) if orb_h else None,
-                    't2_down': round(orb_l - 2.0 * atr_current, 2) if orb_l else None,
-                    'atr': round(atr_current, 2),
-                },
+                'pattern': f"ORB + {gap_pattern_name}" if gap_pattern_name else 'ORB',
+                'direction': gap_direction if gap_pattern_name else 'watch',
+                'notes': f"Range {opening_range:.2f} · {gap_notes}" if gap_notes else f"ATR {atr_current:.2f} > avg {atr_20day_avg:.2f}, range {opening_range:.2f}",
+                'levels': orb_levels,
                 'outcome': {
                     'next_day': False,
                     'breached':  eod_outcome.get('orb_breached', False),
                     'direction': eod_outcome.get('orb_direction', 'none'),
                     'hit_t1':    eod_outcome.get('orb_hit_t1', False),
+                    'filled':    eod_outcome.get('gap_filled', False),
                 }
             })
 
-        if gap['gap_strong']:
-            prev_close_val = round(points[-2][1]['close'], 2)
-            today_open_val = round(today_ohlcv['open'], 2)
-            is_up_gap = gap['gap_type'] == 'up'
-            mult = 1 if is_up_gap else -1
+        elif orb_watch and gap_pattern_name:
+            # Pre-market: combine ORB entry watch with gap target
+            combined_levels = {**gap_levels, 'entry': 'ORB breakout at open'}
             output['active_patterns'].append({
                 'symbol': symbol,
-                'pattern': 'Gap',
-                'direction': gap['gap_type'],
-                'notes': f"Gap {gap['gap_pct']:.2f}%",
-                'levels': {
-                    'prev_close':       prev_close_val,
-                    'today_open':       today_open_val,
-                    'fill_target':      prev_close_val,
-                    't1_continuation':  round(today_open_val + 1.5 * atr_current * mult, 2),
-                    't2_continuation':  round(today_open_val + 2.0 * atr_current * mult, 2),
-                    'atr': round(atr_current, 2),
-                },
-                'outcome': {
-                    'next_day': False,
-                    'filled': eod_outcome.get('gap_filled', False),
-                }
+                'pattern': f"ORB + {gap_pattern_name}",
+                'direction': gap_direction,
+                'notes': f"Entry: ORB breakout · {gap_notes}",
+                'levels': combined_levels,
+                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False)}
+            })
+
+        elif orb_watch:
+            # ORB only — no gap setup
+            output['active_patterns'].append({
+                'symbol': symbol,
+                'pattern': 'ORB',
+                'direction': 'watch',
+                'notes': f"Trending regime · PM range active · no gap",
+                'levels': {},
+                'outcome': {}
+            })
+
+        elif gap_pattern_name:
+            # Gap only — no ORB
+            output['active_patterns'].append({
+                'symbol': symbol,
+                'pattern': gap_pattern_name,
+                'direction': gap_direction,
+                'notes': gap_notes,
+                'levels': gap_levels,
+                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False)}
             })
 
         if engulfing in ['bullish', 'bearish']:
@@ -1096,18 +1328,32 @@ def generate_trading_signals():
                 }
             })
 
-    output['regime'] = detect_regime(regime_symbols, daily_data, hourly_data)
+    # Determine data date from SPY's last bar (after slicing)
+    spy_points = daily_data.get('SPY', [])
+    data_date = datetime.fromtimestamp(spy_points[-1][0], tz=timezone.utc).date() if spy_points else now_utc.date()
 
-    # Write cache file
-    cache_path = CACHE_DIR / 'trading_signals.json'
-    with cache_path.open('w') as f:
+    # Always write dated file
+    dated_path = CACHE_DIR / f"trading_signals_{data_date.isoformat()}.json"
+    with dated_path.open('w') as f:
         json.dump(output, f, indent=2)
-
     print(f"✓ Generated {len(output['symbols'])} symbols, {len(output['active_patterns'])} patterns")
-    print(f"✓ Saved to {cache_path}")
+    print(f"✓ Saved to {dated_path}")
+
+    # On default (no target_date) run, also write the canonical file
+    if target_date is None:
+        cache_path = CACHE_DIR / 'trading_signals.json'
+        with cache_path.open('w') as f:
+            json.dump(output, f, indent=2)
+        print(f"✓ Saved to {cache_path}")
 
     return True
 
 if __name__ == '__main__':
-    success = generate_trading_signals()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--date', type=str, default=None,
+                        help='Target date YYYY-MM-DD (defaults to latest data date)')
+    args = parser.parse_args()
+    target_date = datetime.strptime(args.date, '%Y-%m-%d').date() if args.date else None
+    success = generate_trading_signals(target_date=target_date)
     exit(0 if success else 1)
