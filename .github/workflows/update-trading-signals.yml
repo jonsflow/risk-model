@@ -42,11 +42,6 @@ jobs:
 
       - name: Commit and push updated data
         run: |
-          HOURLY_FILES=$(python3 -c "
-import json
-c = json.load(open('trading_config.json'))
-print(' '.join(f'data/{s[\"symbol\"].lower()}_hourly.csv' for s in c['symbols']))
-")
-          git add $HOURLY_FILES data/cache/trading_signals.json
+          git add data/spy_hourly.csv data/qqq_hourly.csv data/iwm_hourly.csv data/smh_hourly.csv data/btc_hourly.csv data/eth_hourly.csv data/gld_hourly.csv data/slv_hourly.csv data/uso_hourly.csv data/cache/trading_signals.json
           git diff --cached --quiet || git commit -m "Update trading signals (premarket)"
           git push
