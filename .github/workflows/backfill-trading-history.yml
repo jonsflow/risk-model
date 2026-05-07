@@ -1,0 +1,31 @@
+name: Backfill Trading History
+on:
+  workflow_dispatch:
+concurrency:
+  group: backfill-trading
+  cancel-in-progress: false
+permissions:
+  contents: write
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install yfinance
+      - name: Pull latest changes
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git pull --rebase origin main
+      - name: Fetch latest data
+        run: python3 fetch_data.py
+      - name: Run backfill
+        run: python3 backfill_trading_history.py
+      - name: Commit backfilled cache files
+        run: |
+          git add data/cache/trading_signals_*.json
+          git diff --cached --quiet || git commit -m "Backfill trading signals history"
+          git push
