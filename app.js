@@ -300,7 +300,7 @@ function applyDivergenceCache(cache) {
   const scoreElement = document.getElementById("risk-score");
 
   if (scoreElement) {
-    scoreElement.textContent = `${riskScore.signal} (${riskScore.score > 0 ? '+' : ''}${riskScore.score})`;
+    scoreElement.textContent = `${riskScore.signal} (${riskScore.above_count}/${riskScore.total})`;
   }
 
   // Trend-structure risk score (computed from pair trend labels)

@@ -2,7 +2,8 @@ name: Update trading signals (morning premarket)
 
 on:
   schedule:
-    # 9:00 AM ET weekdays (13:00 UTC during EST, 14:00 UTC during EDT)
+    # Weekdays at 13:00 UTC — 9:00 AM ET during EDT (summer), 8:00 AM ET during EST (winter)
+    # Both times are before NYSE open (9:30 AM ET), suitable for premarket data capture
     - cron: "0 13 * * 1-5"
   workflow_dispatch:
 
@@ -41,6 +42,11 @@ jobs:
 
       - name: Commit and push updated data
         run: |
-          git add data/*_hourly.csv data/cache/trading_signals.json
+          HOURLY_FILES=$(python3 -c "
+import json
+c = json.load(open('trading_config.json'))
+print(' '.join(f'data/{s[\"symbol\"].lower()}_hourly.csv' for s in c['symbols']))
+")
+          git add $HOURLY_FILES data/cache/trading_signals.json
           git diff --cached --quiet || git commit -m "Update trading signals (premarket)"
           git push

@@ -518,9 +518,10 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
                                lookback: int, pivot_mode: str, swing: int) -> dict:
     generated = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
-    # Risk score (MA hardcoded at 50 matching app.js calculateRiskScore)
-    score   = 0
-    details = []
+    # Risk score (MA hardcoded at 50): count assets above/below
+    above_count = 0
+    valid_total = 0
+    details     = []
     for sym_obj in symbols:
         sym  = sym_obj['symbol'].lower()
         pts  = data.get(sym, [])
@@ -529,22 +530,22 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
         ma50 = calculate_ma(pts, 50)
         if not ma50:
             continue
+        valid_total  += 1
         current_price = pts[-1][1]
         current_ma    = ma50[-1][1]
         label         = sym_obj['symbol']
         if current_price > current_ma:
-            score += 1
+            above_count += 1
             details.append(f"{label}: Above 50 MA \u2713")
         else:
-            score -= 1
             details.append(f"{label}: Below 50 MA \u2717")
 
-    total = len(symbols)
-    if   score >= math.ceil(total * 0.7):   risk_signal = "\U0001f7e2 STRONG RISK ON"
-    elif score >= math.ceil(total * 0.3):   risk_signal = "\U0001f7e1 RISK ON"
-    elif score >= -math.ceil(total * 0.3):  risk_signal = "\u26aa NEUTRAL"
-    elif score >= -math.ceil(total * 0.7):  risk_signal = "\U0001f7e0 RISK OFF"
-    else:                                   risk_signal = "\U0001f534 STRONG RISK OFF"
+    pct = above_count / valid_total if valid_total else 0
+    if   pct >= 0.75:  risk_signal = "\U0001f7e2 STRONG RISK ON"
+    elif pct >  0.50:  risk_signal = "\U0001f7e1 RISK ON"
+    elif pct >= 0.375: risk_signal = "\u26aa NEUTRAL"
+    elif pct >= 0.125: risk_signal = "\U0001f7e0 RISK OFF"
+    else:              risk_signal = "\U0001f534 STRONG RISK OFF"
 
     # Per-pair analysis
     cache_pairs = []
@@ -596,9 +597,10 @@ def generate_divergence_cache(pairs: list, symbols: list, data: dict,
         'pivot_mode': pivot_mode,
         'swing':      swing,
         'risk_score': {
-            'score':   score,
-            'signal':  risk_signal,
-            'details': details,
+            'above_count': above_count,
+            'total':       valid_total,
+            'signal':      risk_signal,
+            'details':     details,
         },
         'pairs':   cache_pairs,
         'summary': summary,
