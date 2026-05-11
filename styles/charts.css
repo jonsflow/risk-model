@@ -1,0 +1,20 @@
+/* styles/charts.css — Chart container sizing and chart-specific styles */
+
+/* Stacked sparkline in macro/asset cards */
+.asset-sparkline {
+  width: 100%;
+  height: 52px;
+  display: block;
+}
+
+.stacked-sparkline {
+  width: 100%;
+  height: 80px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* Ensure chart containers fill their parent */
+[id^="chart-"] {
+  width: 100%;
+}

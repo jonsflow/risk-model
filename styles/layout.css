@@ -1,0 +1,143 @@
+/* styles/layout.css — Navigation, grid layouts, page structure */
+
+/* Navigation Bar */
+.site-nav {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #2a2b2f;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  scrollbar-width: none;
+}
+.site-nav::-webkit-scrollbar { display: none; }
+
+.nav-link {
+  color: #888;
+  text-decoration: none;
+  padding: 0.4rem 0.8rem;
+  border-radius: 6px;
+  font-size: 14px;
+  transition: color 0.15s, background 0.15s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.nav-link.active,
+.nav-link:hover {
+  color: #e9e9ea;
+  background: #2a2b2f;
+}
+
+/* Header and Controls */
+.header-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.controls-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.control-select {
+  background: #17181b;
+  color: #e9e9ea;
+  border: 1px solid #333;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+/* Row utility */
+.row {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* Two-column grid — stacks to single column on mobile */
+.two-col-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+@media (max-width: 680px) {
+  .two-col-grid { grid-template-columns: 1fr; }
+}
+
+/* Divergence pair columns */
+.risk-cards-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.pairs-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+/* Limit to max 3 columns per row */
+@media (min-width: 1200px) {
+  .pairs-container {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Correlation monitor — wider cards */
+.corr-grid {
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+}
+@media (max-width: 540px) {
+  .corr-grid { grid-template-columns: 1fr; }
+}
+
+/* Macro categories */
+.categories-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.overview-cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+/* Regime row */
+.regime-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 700px) {
+  .regime-row { grid-template-columns: 1fr; }
+}
+
+/* Assets grid */
+.assets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+/* Mobile responsive */
+@media (max-width: 768px) {
+  .header-section { flex-direction: column; }
+  .controls-row { width: 100%; flex-direction: column; }
+  .pill { width: 100%; }
+}
