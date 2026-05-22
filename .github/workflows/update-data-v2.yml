@@ -1,7 +1,9 @@
 name: Update market data v2 (SQLite pipeline)
 
 on:
-  workflow_dispatch:  # manual trigger only until v2 is merged to main
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * 1-5"  # 21:00 UTC weekdays (4 PM ET)
 
 permissions:
   contents: write
@@ -34,8 +36,9 @@ jobs:
         run: python3 -m pipeline.run seed
 
       - name: Fetch Yahoo Finance data → SQLite
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
         run: python3 -m pipeline.run fetch
-        # Note: FRED fetch requires FRED_API_KEY secret; skipped here unless configured
 
       - name: Generate all caches from SQLite
         run: python3 -m pipeline.run generate

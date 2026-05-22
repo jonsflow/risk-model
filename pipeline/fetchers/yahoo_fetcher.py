@@ -64,8 +64,8 @@ def _load_symbols() -> tuple[list[str], dict[str, str]]:
     if correlation_path.exists():
         ccfg = json.loads(correlation_path.read_text())
         for pair in ccfg.get('pairs', []):
-            add(pair['symbol1'])
-            add(pair['symbol2'])
+            add(pair['asset1']['symbol'].upper())
+            add(pair['asset2']['symbol'].upper())
 
     return symbols, ticker_map
 
