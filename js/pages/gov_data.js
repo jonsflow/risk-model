@@ -158,7 +158,7 @@ function renderSeriesCard(series, points, color) {
   card.id = cardId;
   card.innerHTML = `
     <div class="asset-header">
-      <span class="asset-symbol" style="font-size:11px">${series.id}</span>
+      <span class="asset-symbol">${series.id}</span>
       <span class="asset-name">${series.name}</span>
     </div>
     <div class="asset-price-row">

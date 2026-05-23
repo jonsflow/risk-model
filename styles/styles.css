@@ -292,18 +292,19 @@ code {
 
 .asset-header {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .asset-symbol {
   font-weight: 700;
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .asset-name {
   color: #a7a7ad;
   font-size: 11px;
+  line-height: 1.3;
 }
 
 .asset-price-row {
@@ -328,6 +329,7 @@ code {
   width: 100%;
   height: 52px;
   display: block;
+  margin-top: auto;
 }
 
 .asset-signal {
