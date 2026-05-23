@@ -58,7 +58,7 @@ def main():
             skipped += 1
             continue
         print(f"  generating {d}...")
-        subprocess.run(['python3', 'generate_trading_cache.py', '--date', d.isoformat()], check=True)
+        subprocess.run(['python3', 'scripts/generate_trading_cache.py', '--date', d.isoformat()], check=True)
         generated += 1
     print(f"\nDone — {generated} generated, {skipped} skipped")
 
