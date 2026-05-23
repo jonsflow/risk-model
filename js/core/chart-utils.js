@@ -30,12 +30,10 @@ export function createDashboardChart(el, height, overrides) {
     },
     handleScroll: false,
     handleScale: false,
-    width: el.clientWidth,
+    autoSize: true,
     height,
   };
-  const chart = LC.createChart(el, mergeOverrides(base, overrides));
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
-  return chart;
+  return LC.createChart(el, mergeOverrides(base, overrides));
 }
 
 export function createFomcChart(el, height, overrides) {
@@ -53,12 +51,10 @@ export function createFomcChart(el, height, overrides) {
     timeScale: { borderColor: '#2a2a3e', timeVisible: true, minBarSpacing: 0.1 },
     handleScroll: false,
     handleScale: false,
-    width: el.clientWidth,
+    autoSize: true,
     height,
   };
-  const chart = LC.createChart(el, mergeOverrides(base, overrides));
-  new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
-  return chart;
+  return LC.createChart(el, mergeOverrides(base, overrides));
 }
 
 export function fitWithRightPadding(chart, dataLength, pct = 0.02) {

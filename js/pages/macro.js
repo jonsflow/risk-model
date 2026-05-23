@@ -19,7 +19,7 @@ const STACKED_COLORS = [
 // ------------------------------------------------------------------
 
 function renderSparklineSvg(svgEl, pts, maPoints, color) {
-  const W = svgEl.clientWidth || svgEl.getBoundingClientRect().width || 220;
+  const W = 300;
   const H = 52;
   const PAD = { top: 3, right: 3, bottom: 3, left: 3 };
   const cw = W - PAD.left - PAD.right;
@@ -75,6 +75,7 @@ function renderSparklineSvg(svgEl, pts, maPoints, color) {
   }
 
   svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.setAttribute('preserveAspectRatio', 'none');
   svgEl.innerHTML = `
     ${areaSVG}
     <path d="${pricePath}" fill="none" stroke="${color}" stroke-width="1.5"/>
@@ -83,12 +84,13 @@ function renderSparklineSvg(svgEl, pts, maPoints, color) {
 }
 
 function renderStackedSparkline(svgEl, assetsData) {
-  const W = svgEl.clientWidth || 300;
+  const W = 300;
   const H = 80;
   const pad = { top: 6, right: 6, bottom: 6, left: 6 };
   const cw = W - pad.left - pad.right;
   const ch = H - pad.top - pad.bottom;
   svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.setAttribute('preserveAspectRatio', 'none');
   svgEl.innerHTML = '';
 
   const series = assetsData
@@ -168,7 +170,7 @@ function renderAssetCard(assetData, color, maPeriod) {
       <span class="asset-price">${priceStr}</span>
       ${changeHTML}
     </div>
-    <svg class="asset-sparkline" id="sparkline-${symbol.toLowerCase()}" height="52"></svg>
+    <svg class="asset-sparkline" id="sparkline-${symbol.toLowerCase()}" width="100%" height="52"></svg>
     <div class="asset-signal ${signalClass}">${signalLabel}</div>
   `;
 
@@ -502,7 +504,7 @@ function renderOverviewTab(cache) {
         <div class="split-bar-seg" style="width:${pct}%;background:${aboveColor}"></div>
         <div class="split-bar-seg" style="width:${100 - pct}%;background:${belowColor}"></div>
       </div>
-      <svg class="stacked-sparkline" id="stacked-ov-${catData.id}" height="80"></svg>
+      <svg class="stacked-sparkline" id="stacked-ov-${catData.id}" width="100%" height="80"></svg>
       <div class="overview-theme-label">${theme}</div>
       ${desc ? `<div class="overview-theme-desc">${desc}</div>` : ''}
       <div class="overview-chips-section">
@@ -612,7 +614,7 @@ async function loadAndRender() {
 async function init() {
   renderNav();
   try {
-    const config = await fetchCache('macro_config.json');
+    const config = await fetchCache('config/macro_config.json');
     MACRO_CATEGORIES = config.macro_categories || [];
     buildTabUI(MACRO_CATEGORIES);
 

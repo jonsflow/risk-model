@@ -8,12 +8,12 @@ Risk Model is a static GitHub Pages site with eight pages covering divergence si
 
 | Page | File | Data Source | Analysis |
 |------|------|-------------|----------|
-| Divergence | `index.html` / `app.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
-| Macro Model | `macro.html` / `macro_app.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
-| Trade | `trade.html` / `trade_app.js` | trading_signals.json cache | Python (`generate_trading_cache.py`) |
-| Credit Spread | `credit.html` / `credit_app.js` | FRED CSV (`BAMLH0A0HYM2`) | Client-side JS |
-| Gov Data | `gov_data.html` / `gov_data_app.js` | FRED CSVs (`data/fred/`) | Client-side JS |
-| FOMC | `fomc.html` | FRED CSVs (`data/fred/`) | Client-side JS |
+| Divergence | `index.html` / `js/pages/divergence.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
+| Macro Model | `pages/macro.html` / `js/pages/macro.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
+| Trade | `pages/trade.html` / `js/pages/trade.js` | trading_signals.json cache | Python (`generate_trading_cache.py`) |
+| Credit Spread | `pages/credit.html` / `js/pages/credit.js` | FRED CSV (`BAMLH0A0HYM2`) | Client-side JS |
+| Gov Data | `pages/gov_data.html` / `js/pages/gov_data.js` | FRED CSVs (`data/fred/`) | Client-side JS |
+| FOMC | `pages/fomc.html` / `js/pages/fomc.js` | FRED CSVs (`data/fred/`) | Client-side JS |
 
 **Key architectural rule**: Python is the single source of truth for divergence and macro analysis. JS is a pure renderer for those pages. Gov Data and Credit Spread are exceptions — they do lightweight client-side analysis (no pivot detection, just stats).
 
@@ -28,7 +28,7 @@ Risk Model is a static GitHub Pages site with eight pages covering divergence si
 ### FRED Pipeline (Credit + Gov Data)
 1. `fetch_fred.py` fetches FRED series via `fredapi` → `data/fred/{SERIES_ID}.csv`
 2. Requires `FRED_API_KEY` env var (store in `.env`, loaded via `python-dotenv`)
-3. Config driven by `fred_config.json` (categories structure with `display` and `freq` fields)
+3. Config driven by `config/fred_config.json` (categories structure with `display` and `freq` fields)
 4. JS loads CSVs directly and computes stats client-side — no cache files needed
 
 ```bash
@@ -42,11 +42,11 @@ python fetch_fred.py
 
 ```bash
 # Yahoo Finance data
-python3 fetch_data.py          # fetch hourly + daily CSVs
-python3 generate_cache.py      # regenerate all cache files (required after logic changes)
+python3 scripts/fetch_data.py          # fetch hourly + daily CSVs
+python3 scripts/generate_cache.py      # regenerate all cache files (required after logic changes)
 
 # FRED data
-python fetch_fred.py           # fetch all FRED series (reads FRED_API_KEY from .env)
+python3 scripts/fetch_fred.py          # fetch all FRED series (reads FRED_API_KEY from .env)
 
 # Local server (required — file:// causes CORS errors)
 python3 -m http.server 8000
@@ -56,28 +56,39 @@ python3 -m http.server 8000
 
 ```
 .
-├── index.html              # Divergence dashboard
-├── macro.html              # Macro model dashboard
-├── trade.html              # Trade signals dashboard
-├── credit.html             # Credit spread signal
-├── gov_data.html           # Government data (FRED) dashboard
-├── fomc.html               # FOMC & policy rates dashboard
-├── styles.css              # All CSS — shared across all pages
-├── app.js                  # Divergence renderer (pure renderer, reads cache)
-├── macro_app.js            # Macro renderer (pure renderer, reads cache)
-├── trade_app.js            # Trade signals renderer (pure renderer, reads cache)
-├── credit_app.js           # Credit renderer (client-side analysis)
-├── gov_data_app.js         # Gov data renderer (client-side analysis)
-├── config.json             # Divergence pairs + symbol config
-├── macro_config.json       # Macro categories + assets
-├── fred_config.json        # FRED series organized by category (display + freq fields)
-├── fetch_data.py           # Fetches Yahoo Finance CSVs (hourly + daily)
-├── fetch_trading_hourly.py # Fetches intraday data for trading signals
-├── generate_cache.py       # Runs all analysis → data/cache/*.json
-├── generate_trading_cache.py # Generates trading signals cache
-├── fetch_fred.py           # Fetches FRED series → data/fred/*.csv
-├── cache_utils.py          # Shared cache utilities
-├── refresh.sh              # Local data refresh script
+├── index.html              # Divergence dashboard (must stay at root for GitHub Pages)
+├── pages/                  # All other HTML pages
+│   ├── macro.html
+│   ├── trade.html
+│   ├── credit.html
+│   ├── gov_data.html
+│   ├── fomc.html
+│   ├── correlation.html
+│   ├── fed_chair.html
+│   ├── trend_structure.html
+├── js/                     # ES module frontend
+│   ├── pages/              # Page-specific modules
+│   ├── core/               # Shared utilities (api.js, chart-utils.js, utils.js)
+│   └── components/         # UI components (Navigation.js, etc.)
+├── styles/                 # All CSS
+│   └── styles.css          # Main stylesheet (+ base.css, charts.css, etc.)
+├── config/                 # JSON configuration files
+│   ├── config.json         # Divergence pairs + symbol config
+│   ├── macro_config.json   # Macro categories + assets
+│   ├── fred_config.json    # FRED series (display + freq fields)
+│   ├── trading_config.json # Trading symbols
+│   └── correlation_config.json
+├── pipeline/               # v2 SQLite pipeline architecture
+├── scripts/                # All scripts (Python + shell), run from repo root
+│   ├── fetch_data.py           # Fetches Yahoo Finance CSVs (hourly + daily)
+│   ├── fetch_trading_hourly.py # Fetches intraday data for trading signals
+│   ├── fetch_fred.py           # Fetches FRED series → data/fred/*.csv
+│   ├── generate_cache.py       # Runs all analysis → data/cache/*.json
+│   ├── generate_trading_cache.py
+│   ├── generate_correlation_cache.py
+│   ├── cache_utils.py          # Shared cache utilities
+│   └── refresh.sh              # Full refresh (run from repo root)
+├── docs/                   # Documentation
 ├── .env                    # FRED_API_KEY (gitignored)
 ├── data/
 │   ├── spy.csv, etc.       # Daily OHLCV (max history)
@@ -105,7 +116,7 @@ Divergence pairs: SPY↔HYG, SPY↔QQQ, SPY↔IWM, SPY↔SMH, SPY↔GLD, SPY↔B
 - **Growth & Activity**: INDPRO, UMCSENT, RSAFS, FEDFUNDS, NFCI
 - **FOMC & Policy Rates**: DFEDTARU, DFEDTARL, EFFR, IORB, SOFR, SOFR30DAYAVG, WALCL, FEDTARMD, RRPONTSYD, WRESBAL, TREAST, MBST
 
-## fred_config.json Schema
+## config/fred_config.json Schema
 
 Each series has three fields beyond `id` and `name`:
 - `"units"`: display label (%, K, idx, YoY%, $M)

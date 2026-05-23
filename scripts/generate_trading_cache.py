@@ -37,9 +37,9 @@ def load_trading_config() -> tuple:
     Load trading_config.json.
     Returns (trading_symbols, regime_symbols, ticker_map).
     """
-    config_path = Path("trading_config.json")
+    config_path = Path("config/trading_config.json")
     if not config_path.exists():
-        raise FileNotFoundError("trading_config.json not found")
+        raise FileNotFoundError("config/trading_config.json not found")
 
     with config_path.open() as f:
         config = json.load(f)

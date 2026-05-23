@@ -21,7 +21,7 @@ function trendDirection(label) {
 }
 
 function renderSparkline(svgEl, pts) {
-  const W = svgEl.clientWidth || svgEl.getBoundingClientRect().width || 300;
+  const W = 300;
   const H = 70;
   const PAD = { top: 4, right: 4, bottom: 4, left: 4 };
   const cw = W - PAD.left - PAD.right;
@@ -46,6 +46,7 @@ function renderSparkline(svgEl, pts) {
   const areaPath = `${pricePath} L${xN},${bottomY} L${x0},${bottomY} Z`;
 
   svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.setAttribute('preserveAspectRatio', 'none');
   svgEl.innerHTML = `
     <path d="${areaPath}" fill="rgba(74,158,255,0.12)"/>
     <path d="${pricePath}" fill="none" stroke="#4a9eff" stroke-width="1.5" stroke-linejoin="round"/>
@@ -67,7 +68,7 @@ function renderCard(asset) {
       <span class="trend-label ${dir}">${asset.trend_label}</span>
       <span class="trend-score">${score}</span>
     </div>
-    <svg class="trend-sparkline" id="ts-spark-${asset.symbol.toLowerCase()}"></svg>
+    <svg class="trend-sparkline" id="ts-spark-${asset.symbol.toLowerCase()}" width="100%" height="70"></svg>
   `;
 
   requestAnimationFrame(() => {

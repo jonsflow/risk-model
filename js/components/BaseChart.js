@@ -22,14 +22,10 @@ export class BaseChart {
       },
       handleScroll: false,
       handleScale: false,
-      width: el.clientWidth,
+      autoSize: true,
       height,
     };
     this.chart = LC.createChart(el, _merge(base, opts));
-    this._observer = new ResizeObserver(() =>
-      this.chart.applyOptions({ width: el.clientWidth })
-    );
-    this._observer.observe(el);
   }
 
   addLineSeries(opts = {}) {
@@ -50,7 +46,6 @@ export class BaseChart {
   }
 
   destroy() {
-    this._observer.disconnect();
     this.chart.remove();
   }
 }

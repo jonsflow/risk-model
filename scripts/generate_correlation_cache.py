@@ -14,7 +14,7 @@ from pathlib import Path
 
 from cache_utils import load_daily_csv
 
-CONFIG_PATH = Path("correlation_config.json")
+CONFIG_PATH = Path("config/correlation_config.json")
 OUTPUT_PATH = Path("data/cache/correlations.json")
 
 

@@ -105,7 +105,7 @@ function computeStats(points, display, freq) {
 // =============================================================================
 
 function renderSparkline(svgEl, points, color) {
-  const W   = svgEl.clientWidth || svgEl.getBoundingClientRect().width || 220;
+  const W   = 300;
   const H   = 52;
   const PAD = { top: 3, right: 3, bottom: 3, left: 3 };
   const cw  = W - PAD.left - PAD.right;
@@ -128,6 +128,7 @@ function renderSparkline(svgEl, points, color) {
   const priceArea = `${pricePath} L ${xS(n - 1).toFixed(1)} ${bottomY} L ${xS(0).toFixed(1)} ${bottomY} Z`;
 
   svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.setAttribute('preserveAspectRatio', 'none');
   svgEl.innerHTML = `
     <path d="${priceArea}" fill="${color}" opacity="0.15"/>
     <path d="${pricePath}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/>
@@ -165,7 +166,7 @@ function renderSeriesCard(series, points, color) {
       ${changeHTML}
     </div>
     ${dateHTML}
-    <svg class="asset-sparkline" id="${sparkId}" height="52"></svg>
+    <svg class="asset-sparkline" id="${sparkId}" width="100%" height="52"></svg>
     <div class="muted" style="font-size:10px;text-align:right;margin-top:2px">${series.units}</div>
   `;
 
@@ -891,7 +892,7 @@ Sahm(t) = MA₃(t) − min₁₂(t)    →  Trigger: ≥ 0.50 pp</div>
           <span class="asset-price">${formatValue(lastPt.value)}</span>
         </div>
         <div class="muted" style="font-size:10px;margin-top:2px">${lastPt.date}</div>
-        <svg class="asset-sparkline" id="${sparkId}" height="52"></svg>
+        <svg class="asset-sparkline" id="${sparkId}" width="100%" height="52"></svg>
         <div class="muted" style="font-size:10px;text-align:right;margin-top:2px">${s.units}</div>
       `;
       sparkGrid.appendChild(card);
@@ -912,7 +913,7 @@ async function init() {
   const metaEl = document.getElementById('meta');
 
   try {
-    const config = await fetchCache('fred_config.json');
+    const config = await fetchCache('config/fred_config.json');
     GOV_CATEGORIES = config.categories || [];
 
     metaEl.textContent = 'Loading series…';

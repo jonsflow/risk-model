@@ -19,9 +19,9 @@ from cache_utils import TICKER_MAP as _SHARED_TICKER_MAP
 
 def load_config():
     """Load configuration from config.json"""
-    config_path = Path('config.json')
+    config_path = Path('config/config.json')
     if not config_path.exists():
-        print("ERROR: config.json not found", file=sys.stderr)
+        print("ERROR: config/config.json not found", file=sys.stderr)
         sys.exit(1)
 
     with config_path.open('r') as f:
@@ -29,7 +29,7 @@ def load_config():
 
 def load_macro_config():
     """Load macro configuration from macro_config.json"""
-    macro_path = Path('macro_config.json')
+    macro_path = Path('config/macro_config.json')
     if not macro_path.exists():
         return None
 

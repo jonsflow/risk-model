@@ -673,9 +673,9 @@ def main():
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
     # Load configs
-    with open('config.json', encoding='utf-8') as f:
+    with open('config/config.json', encoding='utf-8') as f:
         config = json.load(f)
-    with open('macro_config.json', encoding='utf-8') as f:
+    with open('config/macro_config.json', encoding='utf-8') as f:
         macro_config = json.load(f)
 
     # Override module-level thresholds with values from config if present

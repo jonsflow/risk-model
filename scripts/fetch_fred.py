@@ -26,7 +26,7 @@ from fredapi import Fred
 load_dotenv()
 
 
-CONFIG_PATH = pathlib.Path("fred_config.json")
+CONFIG_PATH = pathlib.Path("config/fred_config.json")
 OUTPUT_DIR  = pathlib.Path("data/fred")
 
 

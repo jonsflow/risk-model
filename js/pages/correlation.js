@@ -144,7 +144,7 @@ async function init() {
   try {
     const [data, config] = await Promise.all([
       fetchCorrelations(),
-      fetchCache('correlation_config.json').catch(() => null),
+      fetchCache('config/correlation_config.json').catch(() => null),
     ]);
 
     if (config) {

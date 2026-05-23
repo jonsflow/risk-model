@@ -74,9 +74,8 @@ function renderChart(containerId, points, color) {
     grid:   { vertLines: { color: '#333' }, horzLines: { color: '#333' } },
     crosshair: { mode: LC.CrosshairMode.Hidden },
     handleScroll: false, handleScale: false,
-    width: container.clientWidth, height: 150,
+    autoSize: true, height: 150,
   });
-  new ResizeObserver(() => chart.applyOptions({ width: container.clientWidth })).observe(container);
 
   const area = chart.addSeries(LC.AreaSeries, {
     lineColor: color,
@@ -259,7 +258,7 @@ async function loadAndRender() {
 async function init() {
   renderNav();
   try {
-    const config = await fetchCache('config.json');
+    const config = await fetchCache('config/config.json');
     if (config.defaults) {
       LOOKBACK_DAYS     = config.defaults.lookback_days     || LOOKBACK_DAYS;
       PIVOT_MODE        = config.defaults.pivot_mode        || PIVOT_MODE;

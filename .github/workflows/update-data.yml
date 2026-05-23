@@ -34,16 +34,16 @@ jobs:
           git pull --rebase origin main
 
       - name: Fetch hourly + daily data from Yahoo Finance
-        run: python3 fetch_data.py
+        run: python3 scripts/fetch_data.py
 
       - name: Generate divergence + macro cache
-        run: python3 generate_cache.py
+        run: python3 scripts/generate_cache.py
 
       - name: Generate trading signals cache
-        run: python3 generate_trading_cache.py
+        run: python3 scripts/generate_trading_cache.py
 
       - name: Generate correlation cache
-        run: python3 generate_correlation_cache.py
+        run: python3 scripts/generate_correlation_cache.py
 
       - name: Commit and push CSV + cache data (if any)
         run: |

@@ -18,9 +18,9 @@ DATA_DIR = Path('data')
 
 
 def load_trading_config():
-    config_path = Path('trading_config.json')
+    config_path = Path('config/trading_config.json')
     if not config_path.exists():
-        print("ERROR: trading_config.json not found", file=sys.stderr)
+        print("ERROR: config/trading_config.json not found", file=sys.stderr)
         sys.exit(1)
     with config_path.open() as f:
         config = json.load(f)
