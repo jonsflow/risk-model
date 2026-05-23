@@ -545,8 +545,8 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
 
         outside_day_dir = _detect_outside_day(points)
         outside_day     = outside_day_dir in ['up', 'down']
-        opening_range   = (max(b[1]['high'] for b in _get_session_bars(hourly, 930, 1030) or [{'high': 0}]) -
-                           min(b[1]['low']  for b in _get_session_bars(hourly, 930, 1030) or [{'low': 0}])) if hourly else 0.0
+        _orb_bars       = _get_session_bars(hourly, 930, 1030, target_date=today_date) if hourly else []
+        opening_range   = (max(b[1]['high'] for b in _orb_bars) - min(b[1]['low'] for b in _orb_bars)) if _orb_bars else 0.0
         orb_qualified   = opening_range > 0.75 * atr_20day_avg if atr_20day_avg else False
         engulfing       = _detect_engulfing(points, vol_20d_avg)
         squeeze         = _calculate_squeeze(hourly) if hourly else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
