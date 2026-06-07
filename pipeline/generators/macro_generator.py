@@ -24,12 +24,12 @@ THRESHOLDS = {
 
 class MacroGenerator(BaseGenerator):
     def generate(self) -> None:
-        macro_path = Path('macro_config.json')
+        macro_path = Path('config/macro_config.json')
         if not macro_path.exists():
             raise FileNotFoundError("macro_config.json not found")
         macro_config = json.loads(macro_path.read_text())
 
-        config_path = Path('config.json')
+        config_path = Path('config/config.json')
         if config_path.exists():
             cfg = json.loads(config_path.read_text())
             THRESHOLDS.update(cfg.get('thresholds', {}))

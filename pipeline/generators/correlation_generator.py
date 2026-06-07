@@ -13,7 +13,7 @@ from pathlib import Path
 from pipeline.base_generator import BaseGenerator
 from pipeline.analysis import log_returns, align_series, rolling_pearson
 
-CONFIG_PATH = Path("correlation_config.json")
+CONFIG_PATH = Path("config/correlation_config.json")
 
 
 class CorrelationGenerator(BaseGenerator):

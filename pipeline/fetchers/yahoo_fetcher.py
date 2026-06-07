@@ -39,13 +39,13 @@ def _load_symbols() -> tuple[list[str], dict[str, str]]:
         if t != symbol:
             ticker_map[symbol] = t
 
-    config_path = Path('config.json')
+    config_path = Path('config/config.json')
     if config_path.exists():
         cfg = json.loads(config_path.read_text())
         for entry in cfg.get('symbols', []):
             add(entry['symbol'], entry.get('ticker'))
 
-    macro_path = Path('macro_config.json')
+    macro_path = Path('config/macro_config.json')
     if macro_path.exists():
         mcfg = json.loads(macro_path.read_text())
         for cat in mcfg.get('macro_categories', []):
@@ -54,13 +54,13 @@ def _load_symbols() -> tuple[list[str], dict[str, str]]:
         for sym in mcfg.get('regime_signals', []):
             add(sym)
 
-    trading_path = Path('trading_config.json')
+    trading_path = Path('config/trading_config.json')
     if trading_path.exists():
         tcfg = json.loads(trading_path.read_text())
         for entry in tcfg.get('symbols', []):
             add(entry['symbol'], entry.get('ticker'))
 
-    correlation_path = Path('correlation_config.json')
+    correlation_path = Path('config/correlation_config.json')
     if correlation_path.exists():
         ccfg = json.loads(correlation_path.read_text())
         for pair in ccfg.get('pairs', []):

@@ -19,7 +19,7 @@ from pipeline.base_fetcher import BaseFetcher
 
 load_dotenv()
 
-CONFIG_PATH = pathlib.Path("fred_config.json")
+CONFIG_PATH = pathlib.Path("config/fred_config.json")
 FRED_OUT_DIR = pathlib.Path("data/fred")
 BUNDLE_PATH = FRED_OUT_DIR / "fred_cache.json"
 

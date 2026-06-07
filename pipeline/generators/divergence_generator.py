@@ -31,7 +31,7 @@ THRESHOLDS = {
 
 class DivergenceGenerator(BaseGenerator):
     def generate(self) -> None:
-        config_path = Path('config.json')
+        config_path = Path('config/config.json')
         if not config_path.exists():
             raise FileNotFoundError("config.json not found")
         config = json.loads(config_path.read_text())

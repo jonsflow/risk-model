@@ -30,7 +30,7 @@ class TradingGenerator(BaseGenerator):
 # ------------------------------------------------------------------
 
 def _load_config() -> tuple:
-    config_path = Path("trading_config.json")
+    config_path = Path("config/trading_config.json")
     if not config_path.exists():
         raise FileNotFoundError("trading_config.json not found")
     config = json.loads(config_path.read_text())
