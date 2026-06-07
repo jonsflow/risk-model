@@ -183,6 +183,8 @@ def get_divergence_signal(trend1: str, trend2: str) -> str:
         return f"ALIGNED {a1}{a2}"
     if trend1 in true_up and trend2 in true_up:
         return f"ALIGNED {a1}{a2}"
+    if trend1 == trend2:
+        return f"ALIGNED {a1}{a2}"
     return f"⚖️ Mixed {a1}{a2}"
 
 
