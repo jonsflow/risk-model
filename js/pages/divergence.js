@@ -82,14 +82,17 @@ function renderChart(containerId, points, color, maPoints) {
     topColor:    hexToRgba(color, 0.35),
     bottomColor: hexToRgba(color, 0),
     lineWidth: 2,
+    crosshairMarkerVisible: false,
     lastValueVisible: true, priceLineVisible: false,
   });
   area.setData(points.map(([time, value]) => ({ time, value })));
 
   if (maPoints?.length) {
     const ma = chart.addSeries(LC.LineSeries, {
-      color: '#f59e0b',
+      color: 'rgba(255,255,255,0.35)',
       lineWidth: 1,
+      lineStyle: LC.LineStyle.Dashed,
+      crosshairMarkerVisible: false,
       lastValueVisible: false, priceLineVisible: false,
     });
     ma.setData(maPoints.map(([time, value]) => ({ time, value })));
