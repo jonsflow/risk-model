@@ -64,7 +64,7 @@ function calculateMA(points, period) {
 // Chart rendering
 // ------------------------------------------------------------------
 
-function renderChart(containerId, points, color) {
+function renderChart(containerId, points, color, maPoints) {
   const container = document.getElementById(containerId);
   if (!container || !points?.length) return;
   container.innerHTML = '';
@@ -72,7 +72,7 @@ function renderChart(containerId, points, color) {
   const chart = LC.createChart(container, {
     layout: { background: { type: 'solid', color: '#17181b' }, textColor: '#e9e9ea' },
     grid:   { vertLines: { color: '#333' }, horzLines: { color: '#333' } },
-    crosshair: { mode: LC.CrosshairMode.Hidden },
+    crosshair: { mode: LC.CrosshairMode.Normal },
     handleScroll: false, handleScale: false,
     autoSize: true, height: 150,
   });
@@ -82,9 +82,18 @@ function renderChart(containerId, points, color) {
     topColor:    hexToRgba(color, 0.35),
     bottomColor: hexToRgba(color, 0),
     lineWidth: 2,
-    lastValueVisible: false, priceLineVisible: false,
+    lastValueVisible: true, priceLineVisible: false,
   });
   area.setData(points.map(([time, value]) => ({ time, value })));
+
+  if (maPoints?.length) {
+    const ma = chart.addSeries(LC.LineSeries, {
+      color: '#f59e0b',
+      lineWidth: 1,
+      lastValueVisible: false, priceLineVisible: false,
+    });
+    ma.setData(maPoints.map(([time, value]) => ({ time, value })));
+  }
 
   chart.timeScale().fitContent();
   return chart;
@@ -238,8 +247,8 @@ function applyDivergenceCache(cache) {
     const ma50_1 = calculateMA(pts1, 50).filter(p => p[0] >= startTime1);
     const ma50_2 = calculateMA(pts2, 50).filter(p => p[0] >= startTime2);
 
-    renderChart(`chart-${pairData.id}-${s1}`, pts1.filter(p => p[0] >= startTime1), pair.color1);
-    renderChart(`chart-${pairData.id}-${s2}`, pts2.filter(p => p[0] >= startTime2), pair.color2);
+    renderChart(`chart-${pairData.id}-${s1}`, pts1.filter(p => p[0] >= startTime1), pair.color1, ma50_1);
+    renderChart(`chart-${pairData.id}-${s2}`, pts2.filter(p => p[0] >= startTime2), pair.color2, ma50_2);
   }
 }
 
