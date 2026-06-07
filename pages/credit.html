@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Credit Spread Signal</title>
+  <base href="../">
+  <link rel="stylesheet" href="styles/styles.css">
+  <meta name="description" content="High-yield credit spread signal — tracks BAMLH0A0HYM2 to flag risk-on/risk-off regimes using spread levels and trend." />
+</head>
+<body>
+  <nav class="site-nav"></nav>
+
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">Credit Spread Signal</h1>
+        <div class="muted" id="meta">Loading data…</div>
+      </div>
+      <div class="controls-row">
+        <div class="pill">
+          <div class="muted">MA Period</div>
+          <select id="maPeriodSelect" class="control-select">
+            <option value="20" selected>20 days</option>
+            <option value="50">50 days</option>
+            <option value="100">100 days</option>
+          </select>
+        </div>
+        <div class="pill">
+          <div class="muted">Percentile Window</div>
+          <select id="windowSelect" class="control-select">
+            <option value="252">1 year</option>
+            <option value="756" selected>3 years</option>
+            <option value="1260">5 years</option>
+          </select>
+        </div>
+        <div class="pill">
+          <div class="muted">Chart History</div>
+          <select id="historySelect" class="control-select">
+            <option value="252">1 year</option>
+            <option value="504" selected>2 years</option>
+            <option value="1260">5 years</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Signal cards -->
+  <div class="risk-cards-container">
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Signal</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="signal-label">—</div>
+      <div class="muted" style="font-size:12px" id="signal-score">—</div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Current Spread</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="current-value">—</div>
+      <div class="muted" style="font-size:12px" id="current-ma">—</div>
+    </div>
+    <div class="card">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Percentile Rank</div>
+      <div style="font-size:24px;font-weight:bold;margin-bottom:4px" id="percentile-value">—</div>
+      <div class="muted" style="font-size:12px" id="percentile-context">—</div>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="card" style="margin-top:18px">
+    <div class="chart-title">ICE BofA US High Yield Index OAS (% over Treasuries)</div>
+    <div id="chart-credit" style="width:100%;height:300px"></div>
+  </div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Data provided by <a href="https://fred.stlouisfed.org" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">FRED (Federal Reserve Bank of St. Louis)</a>
+      · Charts powered by <a href="https://www.tradingview.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">TradingView</a> Lightweight Charts
+      · Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Pages</a>
+      · Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+      <br><span style="color:#6b7280;">Not financial advice — for research and informational purposes only.</span>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="js/pages/credit.js"></script>
+</body>
+</html>

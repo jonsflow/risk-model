@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cross-Asset Correlation Monitor</title>
+  <base href="../">
+  <link rel="stylesheet" href="styles/styles.css">
+  <meta name="description" content="Cross-asset correlation monitor — rolling correlations across SPY, HYG, QQQ, IWM, SMH, GLD, and BTC to track regime shifts and diversification breakdown." />
+</head>
+<body>
+  <nav class="site-nav"></nav>
+
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">Cross-Asset Correlation Monitor</h1>
+        <div class="muted" id="meta">Loading data…</div>
+      </div>
+      <div class="controls-row">
+        <div class="pill">
+          <div class="muted">History Window</div>
+          <select id="historySelect" class="control-select">
+            <option value="252">1 year</option>
+            <option value="504" selected>2 years</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:0">
+    <div style="font-size:12px;color:#a7a7ad;line-height:1.7;display:flex;gap:32px;flex-wrap:wrap">
+      <div>
+        <div style="color:#e9e9ea;font-weight:600;margin-bottom:4px">What the number means</div>
+        <div>Rolling correlation of daily returns.</div>
+        <div><strong style="color:#e9e9ea">+1.0</strong> — move perfectly together</div>
+        <div><strong style="color:#e9e9ea">&nbsp;&nbsp;0</strong> — no relationship</div>
+        <div><strong style="color:#e9e9ea">−1.0</strong> — perfectly opposite</div>
+      </div>
+      <div>
+        <div style="color:#e9e9ea;font-weight:600;margin-bottom:4px">The two lines</div>
+        <div><strong style="color:#e9e9ea">63d (~1 quarter)</strong> — primary signal, filters noise while catching regime shifts</div>
+        <div><strong style="color:#a7a7ad">20d (~1 month)</strong> — shows where the relationship is heading right now</div>
+      </div>
+      <div>
+        <div style="color:#e9e9ea;font-weight:600;margin-bottom:4px">Regime badges</div>
+        <div><strong style="color:#7aa2f7">Intact</strong> — pair moving in its expected direction</div>
+        <div><strong style="color:#f59e0b">Decoupling</strong> — correlation near zero, losing its historical direction</div>
+        <div><strong style="color:#f97316">Broken</strong> — has reversed from its expected direction</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="pairs-grid" class="risk-cards-container corr-grid"></div>
+
+  <div class="card" style="margin-top:18px">
+    <div class="muted" style="text-align:center;font-size:12px">
+      Data provided by <a href="https://finance.yahoo.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Yahoo Finance</a>
+      · Charts powered by <a href="https://www.tradingview.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">TradingView</a> Lightweight Charts
+      · Hosted on <a href="https://pages.github.com" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Pages</a>
+      · Vibe-coded with <a href="https://claude.ai/code" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">Claude Code</a>
+      · <a href="https://github.com/jonsflow/risk-divergence" target="_blank" rel="noopener" style="color:#7aa2f7;text-decoration:none">GitHub Repo</a>
+      <br><span style="color:#6b7280;">Not financial advice — for research and informational purposes only.</span>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+<script type="module" src="js/pages/correlation.js"></script>
+</body>
+</html>

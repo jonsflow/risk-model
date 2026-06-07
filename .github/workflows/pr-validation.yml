@@ -21,7 +21,7 @@ jobs:
       - name: Validate config.json format
         run: |
           echo "Validating config.json..."
-          python3 -m json.tool config.json > /dev/null
+          python3 -m json.tool config/config.json > /dev/null
           echo "✓ config.json is valid JSON"
 
       - name: Validate config.json structure
@@ -30,7 +30,7 @@ jobs:
           import json
           import sys
 
-          with open('config.json') as f:
+          with open('config/config.json') as f:
               config = json.load(f)
 
           # Check required top-level keys
@@ -85,7 +85,7 @@ jobs:
       - name: Check Python syntax
         run: |
           echo "Checking Python syntax..."
-          python3 -m py_compile fetch_data.py
+          python3 -m py_compile scripts/fetch_data.py
           echo "✓ fetch_data.py syntax is valid"
 
       - name: Install Python dependencies
@@ -94,9 +94,9 @@ jobs:
       - name: Test fetch_data.py imports
         run: |
           python3 << 'EOF'
-          import sys
+          import sys, os
+          sys.path.insert(0, 'scripts')
           try:
-              # Test that the script can be imported without errors
               import fetch_data
               print("✓ fetch_data.py imports successfully")
           except Exception as e:

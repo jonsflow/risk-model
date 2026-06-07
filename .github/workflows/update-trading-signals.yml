@@ -35,13 +35,13 @@ jobs:
           git pull --rebase origin main
 
       - name: Fetch premarket hourly data
-        run: python3 fetch_trading_hourly.py
+        run: python3 scripts/fetch_trading_hourly.py
 
       - name: Generate trading signals cache
-        run: python3 generate_trading_cache.py
+        run: python3 scripts/generate_trading_cache.py
 
       - name: Commit and push updated data
         run: |
-          git add $(python3 -c "import json; print(' '.join('data/'+s['symbol'].lower()+'_hourly.csv' for s in json.load(open('trading_config.json'))['symbols']))") data/cache/trading_signals.json
+          git add $(python3 -c "import json; print(' '.join('data/'+s['symbol'].lower()+'_hourly.csv' for s in json.load(open('config/trading_config.json'))['symbols']))") data/cache/trading_signals.json
           git diff --cached --quiet || git commit -m "Update trading signals (premarket)"
           git push

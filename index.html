@@ -4,12 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>SPY–HYG Divergence</title>
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles/styles.css">
   <meta name="description" content="Risk Model — macro risk dashboards covering divergence signals, macro model, credit spreads, FRED economic data, FOMC policy, Fed Chair transitions, and cross-asset correlations." />
 </head>
 <body>
   <nav class="site-nav"></nav>
-  <script src="nav.js"></script>
 
   <!-- Top Section: Lookback & Divergence Explanation -->
   <div class="card">
@@ -118,8 +117,6 @@
   </div>
 
 <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
-<script src="chart-utils.js"></script>
-<script src="trend-line.js"></script>
-<script src="app.js"></script>
+<script type="module" src="js/pages/divergence.js"></script>
 </body>
 </html>

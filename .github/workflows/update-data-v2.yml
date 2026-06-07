@@ -1,0 +1,50 @@
+name: Update market data v2 (SQLite pipeline)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * 1-5"  # 21:00 UTC weekdays (4 PM ET)
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data-v2
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install yfinance python-dotenv fredapi
+
+      - name: Pull latest changes before modifying data
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git pull --rebase origin v2
+
+      - name: Seed SQLite from existing CSVs
+        run: python3 -m pipeline.run seed
+
+      - name: Fetch Yahoo Finance data → SQLite
+        env:
+          FRED_API_KEY: ${{ secrets.FRED_API_KEY }}
+        run: python3 -m pipeline.run fetch
+
+      - name: Generate all caches from SQLite
+        run: python3 -m pipeline.run generate
+
+      - name: Commit and push cache data (if any)
+        run: |
+          git add data/cache/*.json data/fred/fred_cache.json data/last_updated.txt
+          git diff --cached --quiet || git commit -m "chore: update caches (v2 pipeline)"
+          git push
