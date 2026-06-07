@@ -72,7 +72,7 @@ function renderChart(containerId, points, color, maPoints) {
   const chart = LC.createChart(container, {
     layout: { background: { type: 'solid', color: '#17181b' }, textColor: '#e9e9ea' },
     grid:   { vertLines: { color: '#333' }, horzLines: { color: '#333' } },
-    crosshair: { mode: LC.CrosshairMode.Normal },
+    crosshair: { mode: LC.CrosshairMode.Hidden },
     handleScroll: false, handleScale: false,
     autoSize: true, height: 150,
   });
