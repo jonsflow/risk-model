@@ -1,9 +1,10 @@
 // js/pages/trade.js — Trade Recommendations page (ES module).
 import { renderNav } from '../components/Navigation.js';
 
-let cacheData    = null;
-let scoredTrades = null;
-let latestDate   = null;
+let cacheData      = null;
+let scoredTrades   = null;
+let latestDate     = null;
+let selectedSymbol = 'SPY';
 
 function todayET() {
   return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
@@ -50,8 +51,8 @@ function renderHeader() {
     : (grade === 'A+' || grade === 'A') ? '#10b981'
     : grade === 'B' ? '#f59e0b' : '#ef4444';
   const gradeLabel = cacheData.market_closed ? 'Market Closed'
-    : (grade === 'A+' || grade === 'A') ? 'Trading Day'
-    : grade === 'B' ? 'Reduced Size' : 'No Trades';
+    : (grade === 'A+' || grade === 'A') ? 'Favorable'
+    : grade === 'B' ? 'Selective' : 'Sit Out';
 
   document.getElementById('headerMeta').textContent = `as of ${genStr}`;
   document.getElementById('dayQualityBadge').innerHTML =
@@ -114,7 +115,7 @@ function renderDayQuality() {
   const hasData = scores.has_data !== false;
 
   const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = grade === 'A' ? 'Full Size' : grade === 'B' ? 'Reduced Size' : 'No Trades';
+  const gradeLabel = grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
 
   const range = scores.range     || {};
   const gap   = scores.gap       || {};
@@ -124,6 +125,55 @@ function renderDayQuality() {
   const fmtVal = (n, suffix = '') => n != null ? n + suffix : '–';
 
   let html = '';
+
+  // --- SPY price + overnight range chart (Step 1 always shows SPY) ---
+  const spyD  = cacheData.symbols['SPY'] || {};
+  const pmD   = spyD.premarket || {};
+  const gapD  = scores.gap || {};
+  const prX   = gapD.prior_close;
+  const eoX   = gapD.est_open;
+  const pmH   = pmD.high;
+  const pmL   = pmD.low;
+  const lastPx = spyD.close;
+
+  if (prX != null) {
+    const gapDol  = eoX != null ? +(eoX - prX).toFixed(2) : null;
+    const gapPctV = (gapDol != null && prX) ? +(gapDol / prX * 100).toFixed(2) : null;
+    const gc      = gapDol == null || gapDol === 0 ? '#6b7280' : gapDol > 0 ? '#10b981' : '#ef4444';
+    const gSign   = gapDol != null && gapDol >= 0 ? '+' : '';
+    const gArr    = gapDol == null || gapDol === 0 ? '→' : gapDol > 0 ? '↑' : '↓';
+
+    let ps = `<div style="background:#1a1f2e; border-radius:6px; padding:14px 16px; margin-bottom:16px;">`;
+    ps += `<div style="display:flex; gap:24px; align-items:flex-end; flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Prev Close</div>
+        <strong style="font-size:1.7em; letter-spacing:-0.01em;">$${prX.toFixed(2)}</strong>
+      </div>`;
+    if (eoX != null) {
+      ps += `
+      <div>
+        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">RTH Open</div>
+        <strong style="color:${gc};">$${eoX.toFixed(2)}</strong>
+      </div>`;
+      if (gapDol !== null) {
+        ps += `<div style="display:flex; align-items:flex-end;">
+          <span style="background:${gc}18; border:1px solid ${gc}55; color:${gc}; padding:5px 11px; border-radius:4px; font-weight:bold; font-size:0.88em;">
+            ${gArr} Gap ${gSign}$${Math.abs(gapDol).toFixed(2)} (${gSign}${gapPctV?.toFixed(2)}%)
+          </span>
+        </div>`;
+      }
+    }
+    if (pmH != null && pmL != null) {
+      ps += `
+      <div>
+        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">PM Range</div>
+        <strong style="color:#64748b;">$${pmL.toFixed(2)} – $${pmH.toFixed(2)}</strong>
+      </div>`;
+    }
+    ps += `</div></div>`;
+    html += ps;
+  }
+  // --- end price section ---
 
   if (volRegime.label) {
     html += `<div style="margin-bottom: 12px;">
@@ -244,7 +294,7 @@ function renderRegime() {
 function renderPatternScanner() {
   const patterns = cacheData.active_patterns;
   const regime   = cacheData.regime.label;
-  const symbols  = cacheData.symbols;
+  const data     = cacheData.symbols[selectedSymbol];
 
   const regimePatterns = {
     'Trending': ['ORB', 'Gap Fill', 'Gap Continuation', 'Engulfing'],
@@ -259,31 +309,29 @@ function renderPatternScanner() {
     return;
   }
 
-  const rows = Object.keys(symbols).map(sym => {
-    const data       = symbols[sym];
-    const symPatterns = patterns.filter(p => p.symbol === sym && validPatterns.some(v => p.pattern.includes(v)));
+  const symPatterns = patterns.filter(p =>
+    p.symbol === selectedSymbol && validPatterns.some(v => p.pattern.includes(v))
+  );
 
-    let score = 0;
-    if (symPatterns.length > 0)               score += 3;
-    if (data.rsi_14 < 35 || data.rsi_14 > 65) score += 1;
-    if (data.atr_above_avg)                    score += 1;
-
+  if (symPatterns.length === 0) {
     const reasons = [];
-    if (symPatterns.length === 0) {
-      if (!data.gap_significant && !data.outside_day && !(data.patterns && data.patterns.orb_qualified))
-        reasons.push('No pattern');
-      if (data.rsi_14 > 35 && data.rsi_14 < 65) reasons.push('RSI neutral');
-      if (!data.atr_above_avg)                   reasons.push('PM range below avg');
-      if (data.above_ma_20 === false)             reasons.push('Below 20-MA');
-    }
+    if (!data.gap_significant && !data.outside_day && !(data.patterns && data.patterns.orb_qualified))
+      reasons.push('No pattern detected');
+    if (data.rsi_14 > 35 && data.rsi_14 < 65) reasons.push('RSI neutral');
+    if (!data.atr_above_avg)                   reasons.push('PM range below avg');
+    if (data.above_ma_20 === false)             reasons.push('Below 20-MA');
 
-    return { sym, data, symPatterns, score, reasons };
-  }).sort((a, b) => b.score - a.score);
+    document.getElementById('step3Content').innerHTML = `
+      <div style="color: #6b7280; padding: 12px;">
+        No valid ${selectedSymbol} patterns in ${regime} regime.
+        ${reasons.length ? `<span class="muted" style="font-size:0.85em;"> · ${reasons.join(' · ')}</span>` : ''}
+      </div>`;
+    return;
+  }
 
   let html = `<table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="border-bottom: 2px solid #a7a7ad;">
-        <th style="text-align: left; padding: 8px;">Symbol</th>
         <th style="text-align: left; padding: 8px;">Pattern</th>
         <th style="text-align: left; padding: 8px;">Direction</th>
         <th style="text-align: left; padding: 8px;">Notes</th>
@@ -291,30 +339,14 @@ function renderPatternScanner() {
     </thead>
     <tbody>`;
 
-  rows.forEach(({ sym, symPatterns, score, reasons }) => {
-    const sc    = score >= 4 ? '#10b981' : score >= 2 ? '#f59e0b' : '#6b7280';
-    const badge = `<span style="background:${sc}; color:white; padding:1px 6px; border-radius:3px; font-size:0.75em; margin-left:4px;">${score}</span>`;
-
-    if (symPatterns.length > 0) {
-      symPatterns.forEach((p, i) => {
-        const dc = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#6b7280';
-        html += `
-          <tr style="border-bottom: 1px solid #333;">
-            <td style="padding: 8px; font-weight: bold;">${i === 0 ? sym + badge : ''}</td>
-            <td style="padding: 8px;">${p.pattern}</td>
-            <td style="padding: 8px; color: ${dc}; font-weight: bold;">${p.direction}</td>
-            <td style="padding: 8px; font-size: 0.9em;">${p.notes}</td>
-          </tr>`;
-      });
-    } else {
-      html += `
-        <tr style="border-bottom: 1px solid #333; color: #6b7280;">
-          <td style="padding: 8px; font-weight: bold;">${sym}${badge}</td>
-          <td style="padding: 8px;">—</td>
-          <td style="padding: 8px;">—</td>
-          <td style="padding: 8px; font-size: 0.9em;">${reasons.join(' · ') || '—'}</td>
-        </tr>`;
-    }
+  symPatterns.forEach(p => {
+    const dc = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#6b7280';
+    html += `
+      <tr style="border-bottom: 1px solid #333;">
+        <td style="padding: 8px; font-weight: bold;">${p.pattern}</td>
+        <td style="padding: 8px; color: ${dc}; font-weight: bold;">${p.direction}</td>
+        <td style="padding: 8px; font-size: 0.9em;">${p.notes}</td>
+      </tr>`;
   });
 
   html += `</tbody></table>`;
@@ -337,7 +369,7 @@ function scoreConfluences() {
   const validPatterns = regimePatterns[regime] || [];
 
   const scored = patterns
-    .filter(p => validPatterns.some(v => p.pattern.includes(v)))
+    .filter(p => p.symbol === selectedSymbol && validPatterns.some(v => p.pattern.includes(v)))
     .map(p => {
       const sym      = p.symbol;
       const data     = cacheData.symbols[sym];
@@ -627,14 +659,34 @@ function renderEodOutcomes(scored) {
 
   let html = '';
 
-  // Section 1: Day Quality
+  // Section 1: Day Quality + SPY close
   const grade      = cacheData.day_quality.grade;
   const scores     = cacheData.day_quality.scores || {};
   const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = grade === 'A' ? 'Full Size' : grade === 'B' ? 'Reduced Size' : 'No Trades';
+  const gradeLabel = grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
   const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
 
-  let dqBody = `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+  const eodSpyClose  = cacheData.symbols?.['SPY']?.close;
+  const eodPrevClose = scores.gap?.prior_close;
+  const eodChangeDol = (eodSpyClose != null && eodPrevClose != null) ? +(eodSpyClose - eodPrevClose).toFixed(2) : null;
+  const eodChangePct = (eodChangeDol != null && eodPrevClose) ? +(eodChangeDol / eodPrevClose * 100).toFixed(2) : null;
+  const eodColor     = eodChangeDol == null || eodChangeDol === 0 ? '#6b7280' : eodChangeDol > 0 ? '#10b981' : '#ef4444';
+  const eodSign      = eodChangeDol != null && eodChangeDol >= 0 ? '+' : '';
+
+  let spyCloseRow = '';
+  if (eodSpyClose != null) {
+    spyCloseRow = `<div style="display:flex; align-items:center; gap:16px; margin-bottom:12px; background:#22242a; border-radius:6px; padding:10px 14px;">
+      <div>
+        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">SPY Close</div>
+        <strong style="font-size:1.3em;">$${eodSpyClose.toFixed(2)}</strong>
+      </div>
+      ${eodChangeDol !== null ? `<span style="background:${eodColor}18; border:1px solid ${eodColor}55; color:${eodColor}; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:0.88em;">
+        ${eodChangeDol > 0 ? '↑' : eodChangeDol < 0 ? '↓' : '→'} ${eodSign}$${Math.abs(eodChangeDol).toFixed(2)} (${eodSign}${eodChangePct?.toFixed(2)}%) vs prev close
+      </span>` : ''}
+    </div>`;
+  }
+
+  let dqBody = spyCloseRow + `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
     ${pill('Day Grade', `${grade} (${scores.total ?? '–'}/${scores.max ?? 6})`, gradeColor, gradeLabel)}
     ${pill('PM Range',  scores.range?.ratio != null ? scores.range.ratio + '×' : '–', scoreColor(scores.range?.score ?? 0), null)}
     ${pill('Gap vs ATR', scores.gap?.ratio != null ? scores.gap.ratio + '×' : '–',    scoreColor(scores.gap?.score ?? 0),   null)}
@@ -663,9 +715,9 @@ function renderEodOutcomes(scored) {
     <div class="muted" style="font-size:0.85em;">Valid patterns today: <strong style="color:#e2e8f0;">${patternMenus[regime.label] || '—'}</strong></div>`);
 
   // Section 3: Pattern Outcomes
-  const patterns = cacheData.active_patterns;
+  const patterns = cacheData.active_patterns.filter(p => p.symbol === selectedSymbol);
   if (patterns.length === 0) {
-    html += sec('3 — Pattern Outcomes', '<div class="muted">No patterns detected today.</div>');
+    html += sec('3 — Pattern Outcomes', `<div class="muted">No patterns detected for ${selectedSymbol} today.</div>`);
   } else {
     const patternCards = patterns.map(p => {
       const oc       = p.outcome || {};
@@ -918,6 +970,26 @@ async function init() {
 
     latestDate = cacheData.symbols?.SPY?.date || todayET();
     const today = todayET();
+
+    // Populate symbol selector
+    const selector = document.getElementById('symbolSelector');
+    Object.keys(cacheData.symbols).forEach(sym => {
+      const opt = document.createElement('option');
+      opt.value = sym;
+      opt.textContent = sym;
+      if (sym === selectedSymbol) opt.selected = true;
+      selector.appendChild(opt);
+    });
+    selector.addEventListener('change', () => {
+      selectedSymbol = selector.value;
+      if (!cacheData.market_closed && !['C', 'F'].includes(cacheData.day_quality.grade)) {
+        renderPatternScanner();
+        const scored = scoreConfluences();
+        scoredTrades = scored;
+        renderRecommendations(scored);
+        renderPositionCalc(scored);
+      }
+    });
 
     const picker = document.getElementById('tradeDatePicker');
     picker.value = today;
