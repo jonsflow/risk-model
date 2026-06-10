@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TradingView Test</title>
+  <link rel="stylesheet" href="../styles/styles.css">
+</head>
+<body>
+  <div class="card">
+    <h1>TradingView Lightweight Charts Test</h1>
+    <div class="chart-container">
+      <div class="chart-title">
+        SPY &nbsp;
+        <select id="lookback">
+          <option value="20">20d</option>
+          <option value="50">50d</option>
+          <option value="100">100d</option>
+        </select>
+        &nbsp; Pivots:
+        <select id="pivot-mode">
+          <option value="fixed1">Fixed N=1</option>
+          <option value="fixed2">Fixed N=2</option>
+          <option value="zigzag">ZigZag %</option>
+          <option value="atr">ATR-based</option>
+          <option value="prominence">Prominence %</option>
+        </select>
+        &nbsp; <input id="pivot-param" type="number" step="0.1" style="width:60px" title="Parameter for selected mode">
+      </div>
+      <div id="chart-container" style="width:100%;height:calc(100vh - 120px)"></div>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/lightweight-charts@5.0.0/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="../js/pages/test.js"></script>
+</body>
+</html>
