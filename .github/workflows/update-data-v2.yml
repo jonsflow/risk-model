@@ -3,7 +3,8 @@ name: Update market data v2 (SQLite pipeline)
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 21 * * 1-5"  # 21:00 UTC weekdays (4 PM ET)
+    - cron: "0 14 * * 1-5"  # 14:00 UTC weekdays (9 AM ET / 8 AM CT, pre-market)
+    - cron: "0 21 * * 1-5"  # 21:00 UTC weekdays (4 PM ET / 3 PM CT, post-market)
 
 permissions:
   contents: write
