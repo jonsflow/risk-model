@@ -9,7 +9,7 @@ const LC = window.LightweightCharts;
 
 const FOMC_SERIES = [
   'DFEDTARU', 'DFEDTARL', 'EFFR', 'IORB', 'SOFR', 'SOFR30DAYAVG',
-  'WALCL', 'FEDTARMD', 'RRPONTSYD', 'WRESBAL', 'TREAST', 'MBST',
+  'WALCL', 'FEDTARMD', 'RRPONTSYD', 'WRESBAL', 'TREAST', 'WSHOMCB',
   'FEDFUNDS',
 ];
 
@@ -230,7 +230,7 @@ function renderReverseRepoChart(data) {
 function renderBalanceSheetChart(data) {
   const walcl  = data['WALCL'];
   const treast = data['TREAST'];
-  const mbst   = data['MBST'];
+  const wshomcb = data['WSHOMCB'];
   if (!walcl || walcl.length < 2) return;
 
   const toB = pts => pts.map(p => ({ time: p.date, value: +(p.value / 1000).toFixed(1) }));
@@ -252,18 +252,18 @@ function renderBalanceSheetChart(data) {
     });
     s.setData(toB(treast));
   }
-  if (mbst?.length >= 2) {
+  if (wshomcb?.length >= 2) {
     const s = chart.addSeries(LC.LineSeries, {
       color: colors.mbs, lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
     });
-    s.setData(toB(mbst));
+    s.setData(toB(wshomcb));
   }
 
   const entries = [
     { label: 'Total Assets', color: colors.balSheet, value: `$${(walcl[walcl.length-1].value/1000).toFixed(0)}B` },
   ];
-  if (treast?.length) entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
-  if (mbst?.length)   entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(mbst[mbst.length-1].value/1000).toFixed(0)}B` });
+  if (treast?.length)   entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
+  if (wshomcb?.length)  entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(wshomcb[wshomcb.length-1].value/1000).toFixed(0)}B` });
   addChartLegend('chart-balance-sheet', entries);
   fitWithRightPadding(chart, walcl.length);
 }

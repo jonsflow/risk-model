@@ -8,7 +8,7 @@ import {
 const LC = window.LightweightCharts;
 
 const FEDCHAIR_SERIES = [
-  'WALCL', 'TREAST', 'MBST',
+  'WALCL', 'TREAST', 'WSHOMCB',
   'WRESBAL', 'RRPONTSYD',
   'FEDFUNDS', 'EFFR',
   'PCEPILFE', 'CPILFESL',
@@ -275,10 +275,10 @@ function renderBalanceSheetChart(data) {
   });
 
   const treast = data['TREAST'];
-  const mbst   = data['MBST'];
+  const wshomcb = data['WSHOMCB'];
   const entries = [{ label: 'Total Assets', color: colors.balSheet, value: `$${(walcl[walcl.length-1].value/1000).toFixed(0)}B` }];
-  if (treast?.length) entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
-  if (mbst?.length)   entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(mbst[mbst.length-1].value/1000).toFixed(0)}B` });
+  if (treast?.length)  entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
+  if (wshomcb?.length) entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(wshomcb[wshomcb.length-1].value/1000).toFixed(0)}B` });
   addChartLegend('chart-balance-sheet', entries);
   fitWithRightPadding(chart, walcl.length, 0.04);
 
