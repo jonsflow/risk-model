@@ -1,38 +1,43 @@
 {
-  "generated": "2026-06-08T21:38:56.155877+00:00",
+  "generated": "2026-06-17T06:32:14.682031+00:00",
   "market_closed": false,
   "day_quality": {
-    "grade": "B",
+    "grade": "A+",
     "scores": {
-      "total": 3,
-      "max": 6,
-      "rvol": {
-        "score": 0,
-        "ratio": null,
-        "pm_vol_today": null,
-        "pm_vol_avg_20d": null
-      },
-      "range": {
-        "score": 1,
-        "ratio": 1.08,
-        "pm_range_today": 4.39,
-        "pm_range_avg_20d": 4.07
-      },
-      "gap": {
-        "score": 1,
-        "ratio": 0.93,
-        "gap_pts": 1.62,
+      "total": 7,
+      "max": 8,
+      "gap_range": {
+        "score": 2,
+        "has_gap": true,
+        "has_pm_range": true,
+        "gap_pts": 5.81,
+        "gap_ratio": 3.33,
         "median_gap": 1.74,
         "prior_close": 737.55,
-        "est_open": 739.17
+        "est_open": 743.36,
+        "pm_range_ratio": 1.69,
+        "pm_range_today": 6.87,
+        "pm_range_avg_20d": 4.07
       },
       "structure": {
         "score": 1,
         "regime": "Ranging"
       },
-      "has_data": true,
-      "has_rvol": false,
-      "has_range": true
+      "adr": {
+        "score": 2,
+        "adr_5d": 7.72,
+        "adr_20d": 6.2,
+        "ratio": 1.25
+      },
+      "alignment": {
+        "score": 2,
+        "detail": {
+          "SPY": "down",
+          "QQQ": "down",
+          "IWM": "down"
+        }
+      },
+      "has_data": true
     }
   },
   "regime": {
@@ -48,7 +53,8 @@
       "high": 745.34,
       "low": 738.19,
       "close": 739.22,
-      "volume": 41824280,
+      "volume": 49319100,
+      "volume_above_20d": true,
       "atr_14": 7.13,
       "atr_20d_avg": 7.0,
       "atr_above_avg": true,
@@ -73,22 +79,22 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": -4.0538,
+        "status": "normal",
+        "momentum": -1.5855,
         "momentum_increasing": true
       },
       "vwap": {
-        "vwap": 742.85,
+        "vwap": 741.71,
         "above_vwap": false,
-        "distance_pct": -0.1
+        "distance_pct": -0.32
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 741.22,
-        "orb_low": 739.15,
+        "orb_high": 744.51,
+        "orb_low": 740.6,
         "orb_breached_up": true,
         "orb_breached_down": true,
         "orb_breached": true,
@@ -99,24 +105,28 @@
         "day_range_pct": 0.97,
         "day_atr_multiple": 1.0
       },
+      "adr_20d": 6.2,
+      "adr_5d": 7.72,
+      "prev_range": 17.29,
       "premarket": {
-        "high": 740.71,
-        "low": 736.32,
-        "close": 740.36
+        "high": 744.42,
+        "low": 737.55,
+        "close": 743.86
       },
       "last_hour": {
-        "high": 744.35,
-        "low": 741.87,
-        "close": 742.14
+        "high": 740.18,
+        "low": 738.77,
+        "close": 739.31
       }
     },
     "QQQ": {
       "date": "2026-06-08",
       "open": 717.81,
       "high": 723.03,
-      "low": 713.1,
+      "low": 713.07,
       "close": 716.07,
-      "volume": 44898470,
+      "volume": 47401500,
+      "volume_above_20d": true,
       "atr_14": 12.09,
       "atr_20d_avg": 10.86,
       "atr_above_avg": true,
@@ -141,58 +151,62 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "normal",
-        "momentum": 13.923,
-        "momentum_increasing": true
+        "status": "strong",
+        "momentum": 13.1314,
+        "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 718.23,
-        "above_vwap": true,
-        "distance_pct": 0.14
+        "vwap": 717.94,
+        "above_vwap": false,
+        "distance_pct": -0.26
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 711.72,
-        "orb_low": 709.32,
+        "orb_high": 719.21,
+        "orb_low": 713.1,
         "orb_breached_up": true,
-        "orb_breached_down": false,
+        "orb_breached_down": true,
         "orb_breached": true,
-        "orb_direction": "up",
+        "orb_direction": "down",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 9.93,
-        "day_range_pct": 1.39,
+        "day_range": 9.96,
+        "day_range_pct": 1.4,
         "day_atr_multiple": 0.82
       },
+      "adr_20d": 10.24,
+      "adr_5d": 12.55,
+      "prev_range": 27.37,
       "premarket": {
-        "high": 711.72,
-        "low": 704.51,
-        "close": 710.88
+        "high": 719.72,
+        "low": 705.06,
+        "close": 717.87
       },
       "last_hour": {
-        "high": 722.27,
-        "low": 718.58,
-        "close": 719.27
+        "high": 717.06,
+        "low": 715.21,
+        "close": 716.1
       }
     },
     "IWM": {
       "date": "2026-06-08",
-      "open": 285.51,
-      "high": 286.84,
-      "low": 283.58,
-      "close": 284.11,
-      "volume": 26540237,
-      "atr_14": 5.38,
+      "open": 284.83,
+      "high": 286.16,
+      "low": 282.91,
+      "close": 283.44,
+      "volume": 27277400,
+      "volume_above_20d": true,
+      "atr_14": 5.43,
       "atr_20d_avg": 4.86,
       "atr_above_avg": true,
-      "rsi_14": 51.4,
-      "macd_line": -3.1382,
-      "macd_signal": -2.3629,
-      "macd_histogram": -0.7753,
-      "ma_20": 284.92,
+      "rsi_14": 50.7,
+      "macd_line": -3.0425,
+      "macd_signal": -2.3358,
+      "macd_histogram": -0.7067,
+      "ma_20": 284.86,
       "above_ma_20": false,
       "gap_pct": 1.37,
       "gap_type": "up",
@@ -210,40 +224,43 @@
       "engulfing": "none",
       "squeeze": {
         "status": "weak",
-        "momentum": 0.3045,
+        "momentum": -0.137,
         "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 285.32,
+        "vwap": 284.98,
         "above_vwap": false,
-        "distance_pct": -0.04
+        "distance_pct": -0.3
       },
       "rsi_divergence": {
-        "signal": "bullish",
-        "description": "Price LL, RSI HL"
+        "signal": "none",
+        "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 284.46,
-        "orb_low": 283.4,
+        "orb_high": 285.61,
+        "orb_low": 283.99,
         "orb_breached_up": true,
-        "orb_breached_down": false,
+        "orb_breached_down": true,
         "orb_breached": true,
-        "orb_direction": "up",
+        "orb_direction": "down",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 3.26,
+        "day_range": 3.25,
         "day_range_pct": 1.15,
-        "day_atr_multiple": 0.61
+        "day_atr_multiple": 0.6
       },
+      "adr_20d": 4.32,
+      "adr_5d": 5.3,
+      "prev_range": 9.23,
       "premarket": {
-        "high": 284.2,
-        "low": 280.99,
-        "close": 283.85
+        "high": 286.2,
+        "low": 281.65,
+        "close": 285.61
       },
       "last_hour": {
-        "high": 286.37,
-        "low": 285.18,
-        "close": 285.22
+        "high": 284.6,
+        "low": 283.99,
+        "close": 284.13
       }
     },
     "SMH": {
@@ -252,7 +269,8 @@
       "high": 606.2,
       "low": 588.54,
       "close": 598.16,
-      "volume": 13288821,
+      "volume": 13823900,
+      "volume_above_20d": true,
       "atr_14": 25.18,
       "atr_20d_avg": 20.45,
       "atr_above_avg": true,
@@ -278,21 +296,21 @@
       "engulfing": "none",
       "squeeze": {
         "status": "none",
-        "momentum": 10.1629,
-        "momentum_increasing": true
+        "momentum": 7.3323,
+        "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 597.36,
-        "above_vwap": true,
-        "distance_pct": 0.63
+        "vwap": 597.95,
+        "above_vwap": false,
+        "distance_pct": -0.05
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 583.75,
-        "orb_low": 580.24,
+        "orb_high": 599.55,
+        "orb_low": 588.54,
         "orb_breached_up": true,
         "orb_breached_down": false,
         "orb_breached": true,
@@ -303,35 +321,39 @@
         "day_range_pct": 3.0,
         "day_atr_multiple": 0.7
       },
+      "adr_20d": 19.49,
+      "adr_5d": 24.96,
+      "prev_range": 37.31,
       "premarket": {
-        "high": 585.15,
-        "low": 570.51,
-        "close": 582.26
+        "high": 597.99,
+        "low": 588.17,
+        "close": 596.69
       },
       "last_hour": {
-        "high": 605.45,
-        "low": 599.69,
-        "close": 601.12
+        "high": 599.55,
+        "low": 595.69,
+        "close": 597.63
       }
     },
     "BTC": {
       "date": "2026-06-08",
-      "open": 63310.3,
-      "high": 64166.36,
-      "low": 62450.61,
-      "close": 63750.38,
-      "volume": 38775382016,
-      "atr_14": 2642.14,
-      "atr_20d_avg": 2067.89,
+      "open": 63244.09,
+      "high": 64185.77,
+      "low": 62384.67,
+      "close": 63090.59,
+      "volume": 34133252457,
+      "volume_above_20d": false,
+      "atr_14": 2648.24,
+      "atr_20d_avg": 2068.2,
       "atr_above_avg": true,
-      "rsi_14": 28.4,
-      "macd_line": 6883.2702,
-      "macd_signal": 5025.8533,
-      "macd_histogram": 1857.4169,
-      "ma_20": 71022.65,
+      "rsi_14": 26.1,
+      "macd_line": 6932.1434,
+      "macd_signal": 5035.6279,
+      "macd_histogram": 1896.5155,
+      "ma_20": 70989.66,
       "above_ma_20": false,
-      "gap_pct": 0.11,
-      "gap_type": "up",
+      "gap_pct": 0.01,
+      "gap_type": "none",
       "gap_significant": true,
       "gap_strong": true,
       "median_overnight_gap": 1.36,
@@ -339,15 +361,15 @@
       "outside_day_direction": "none",
       "patterns": {
         "orb_qualified": false,
-        "gap_fill_candidate": true,
-        "gap_continuation_candidate": true,
+        "gap_fill_candidate": false,
+        "gap_continuation_candidate": false,
         "outside_day": false
       },
       "engulfing": "none",
       "squeeze": {
         "status": "strong",
-        "momentum": 435.7683,
-        "momentum_increasing": true
+        "momentum": -221.8388,
+        "momentum_increasing": false
       },
       "vwap": {
         "vwap": 63711.54,
@@ -364,13 +386,16 @@
         "orb_breached_up": true,
         "orb_breached_down": true,
         "orb_breached": true,
-        "orb_direction": "up",
+        "orb_direction": "down",
         "orb_hit_t1": false,
-        "gap_filled": true,
-        "day_range": 1715.75,
-        "day_range_pct": 2.75,
-        "day_atr_multiple": 0.65
+        "gap_filled": false,
+        "day_range": 1801.1,
+        "day_range_pct": 2.89,
+        "day_atr_multiple": 0.68
       },
+      "adr_20d": 2357.44,
+      "adr_5d": 3382.72,
+      "prev_range": 3403.98,
       "premarket": {
         "high": 63501.74,
         "low": 62941.17,
@@ -384,22 +409,23 @@
     },
     "ETH": {
       "date": "2026-06-08",
-      "open": 1689.78,
-      "high": 1712.68,
-      "low": 1646.67,
-      "close": 1711.9,
-      "volume": 18787819520,
-      "atr_14": 96.18,
-      "atr_20d_avg": 77.05,
+      "open": 1686.25,
+      "high": 1713.47,
+      "low": 1644.79,
+      "close": 1690.15,
+      "volume": 17427269148,
+      "volume_above_20d": true,
+      "atr_14": 96.37,
+      "atr_20d_avg": 77.06,
       "atr_above_avg": false,
-      "rsi_14": 30.3,
-      "macd_line": 198.2081,
-      "macd_signal": 156.0535,
-      "macd_histogram": 42.1546,
-      "ma_20": 1938.75,
+      "rsi_14": 28.0,
+      "macd_line": 199.8193,
+      "macd_signal": 156.3758,
+      "macd_histogram": 43.4436,
+      "ma_20": 1937.66,
       "above_ma_20": false,
-      "gap_pct": 0.2,
-      "gap_type": "up",
+      "gap_pct": -0.01,
+      "gap_type": "none",
       "gap_significant": true,
       "gap_strong": true,
       "median_overnight_gap": 0.05,
@@ -407,15 +433,15 @@
       "outside_day_direction": "none",
       "patterns": {
         "orb_qualified": false,
-        "gap_fill_candidate": true,
-        "gap_continuation_candidate": true,
+        "gap_fill_candidate": false,
+        "gap_continuation_candidate": false,
         "outside_day": false
       },
       "engulfing": "none",
       "squeeze": {
         "status": "normal",
-        "momentum": 33.2314,
-        "momentum_increasing": true
+        "momentum": 10.0068,
+        "momentum_increasing": false
       },
       "vwap": {
         "vwap": 1685.73,
@@ -434,11 +460,14 @@
         "orb_breached": true,
         "orb_direction": "up",
         "orb_hit_t1": false,
-        "gap_filled": true,
-        "day_range": 66.01,
-        "day_range_pct": 4.01,
-        "day_atr_multiple": 0.69
+        "gap_filled": false,
+        "day_range": 68.68,
+        "day_range_pct": 4.18,
+        "day_atr_multiple": 0.71
       },
+      "adr_20d": 87.85,
+      "adr_5d": 138.78,
+      "prev_range": 151.19,
       "premarket": {
         "high": 1671.6,
         "low": 1655.9,
@@ -454,12 +483,13 @@
       "date": "2026-06-08",
       "open": 397.52,
       "high": 398.98,
-      "low": 396.04,
+      "low": 396.03,
       "close": 397.27,
-      "volume": 7021488,
+      "volume": 8057300,
+      "volume_above_20d": true,
       "atr_14": 7.35,
       "atr_20d_avg": 7.32,
-      "atr_above_avg": true,
+      "atr_above_avg": false,
       "rsi_14": 34.1,
       "macd_line": 10.2303,
       "macd_signal": 8.1483,
@@ -482,52 +512,56 @@
       "engulfing": "none",
       "squeeze": {
         "status": "strong",
-        "momentum": -4.9616,
+        "momentum": -6.2631,
         "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 397.38,
-        "above_vwap": true,
-        "distance_pct": 0.27
+        "vwap": 397.55,
+        "above_vwap": false,
+        "distance_pct": -0.1
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 395.19,
-        "orb_low": 393.4,
+        "orb_high": 398.95,
+        "orb_low": 396.08,
         "orb_breached_up": true,
-        "orb_breached_down": false,
+        "orb_breached_down": true,
         "orb_breached": true,
-        "orb_direction": "up",
+        "orb_direction": "down",
         "orb_hit_t1": false,
         "gap_filled": true,
-        "day_range": 2.94,
+        "day_range": 2.95,
         "day_range_pct": 0.74,
         "day_atr_multiple": 0.4
       },
+      "adr_20d": 5.33,
+      "adr_5d": 5.0,
+      "prev_range": 8.8,
       "premarket": {
-        "high": 396.73,
-        "low": 391.81,
-        "close": 394.14
+        "high": 398.41,
+        "low": 396.24,
+        "close": 396.96
       },
       "last_hour": {
-        "high": 398.9,
-        "low": 397.24,
-        "close": 398.47
+        "high": 397.48,
+        "low": 396.86,
+        "close": 397.15
       }
     },
     "SLV": {
       "date": "2026-06-08",
       "open": 62.03,
-      "high": 62.29,
+      "high": 62.3,
       "low": 61.24,
       "close": 61.58,
-      "volume": 21599498,
+      "volume": 22342200,
+      "volume_above_20d": false,
       "atr_14": 2.29,
       "atr_20d_avg": 2.95,
-      "atr_above_avg": true,
+      "atr_above_avg": false,
       "rsi_14": 35.2,
       "macd_line": 4.1669,
       "macd_signal": 2.1453,
@@ -550,21 +584,21 @@
       "engulfing": "none",
       "squeeze": {
         "status": "strong",
-        "momentum": 0.0827,
-        "momentum_increasing": true
+        "momentum": -0.2886,
+        "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 61.79,
-        "above_vwap": true,
-        "distance_pct": 0.46
+        "vwap": 61.8,
+        "above_vwap": false,
+        "distance_pct": -0.34
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 61.0,
-        "orb_low": 60.4,
+        "orb_high": 62.29,
+        "orb_low": 61.24,
         "orb_breached_up": true,
         "orb_breached_down": false,
         "orb_breached": true,
@@ -572,27 +606,31 @@
         "orb_hit_t1": false,
         "gap_filled": true,
         "day_range": 1.06,
-        "day_range_pct": 1.72,
+        "day_range_pct": 1.73,
         "day_atr_multiple": 0.46
       },
+      "adr_20d": 1.86,
+      "adr_5d": 1.66,
+      "prev_range": 2.89,
       "premarket": {
-        "high": 61.54,
-        "low": 59.88,
-        "close": 60.63
+        "high": 62.36,
+        "low": 61.55,
+        "close": 61.84
       },
       "last_hour": {
-        "high": 62.29,
-        "low": 61.9,
-        "close": 62.08
+        "high": 61.74,
+        "low": 61.52,
+        "close": 61.59
       }
     },
     "USO": {
       "date": "2026-06-08",
       "open": 134.95,
       "high": 136.53,
-      "low": 133.98,
+      "low": 133.95,
       "close": 135.15,
-      "volume": 4537717,
+      "volume": 4564300,
+      "volume_above_20d": false,
       "atr_14": 6.02,
       "atr_20d_avg": 6.55,
       "atr_above_avg": true,
@@ -618,40 +656,43 @@
       "engulfing": "none",
       "squeeze": {
         "status": "none",
-        "momentum": -0.7541,
-        "momentum_increasing": false
+        "momentum": -0.7132,
+        "momentum_increasing": true
       },
       "vwap": {
-        "vwap": 135.14,
+        "vwap": 135.17,
         "above_vwap": true,
-        "distance_pct": 0.52
+        "distance_pct": 0.07
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 140.5,
-        "orb_low": 137.76,
-        "orb_breached_up": false,
-        "orb_breached_down": true,
+        "orb_high": 135.48,
+        "orb_low": 133.95,
+        "orb_breached_up": true,
+        "orb_breached_down": false,
         "orb_breached": true,
-        "orb_direction": "down",
+        "orb_direction": "up",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 2.55,
-        "day_range_pct": 1.9,
-        "day_atr_multiple": 0.42
+        "day_range": 2.58,
+        "day_range_pct": 1.93,
+        "day_atr_multiple": 0.43
       },
+      "adr_20d": 4.46,
+      "adr_5d": 3.48,
+      "prev_range": 2.96,
       "premarket": {
-        "high": 140.34,
-        "low": 137.91,
-        "close": 139.5
+        "high": 136.34,
+        "low": 134.69,
+        "close": 135.88
       },
       "last_hour": {
-        "high": 135.94,
-        "low": 135.09,
-        "close": 135.85
+        "high": 135.58,
+        "low": 135.02,
+        "close": 135.27
       }
     }
   },
@@ -682,7 +723,7 @@
         "prev_close": 705.06,
         "today_open": 717.81,
         "fill_target": 705.06,
-        "t1_continuation": 735.94,
+        "t1_continuation": 735.95,
         "atr": 12.09
       },
       "outcome": {
@@ -694,13 +735,13 @@
       "symbol": "IWM",
       "pattern": "Gap Fill",
       "direction": "down",
-      "notes": "Gap +1.37% \u00b7 3.86 pts \u00b7 3.1\u00d7 median \u00b7 Ranging",
+      "notes": "Gap +1.37% \u00b7 3.85 pts \u00b7 3.1\u00d7 median \u00b7 Ranging",
       "levels": {
-        "prev_close": 281.65,
-        "today_open": 285.51,
-        "fill_target": 281.65,
-        "t1_continuation": 293.58,
-        "atr": 5.38
+        "prev_close": 280.98,
+        "today_open": 284.83,
+        "fill_target": 280.98,
+        "t1_continuation": 292.97,
+        "atr": 5.43
       },
       "outcome": {
         "next_day": false,
@@ -722,40 +763,6 @@
       "outcome": {
         "next_day": false,
         "filled": false
-      }
-    },
-    {
-      "symbol": "BTC",
-      "pattern": "Gap Fill",
-      "direction": "down",
-      "notes": "Gap +0.11% \u00b7 70.78 pts \u00b7 52.2\u00d7 median \u00b7 Ranging",
-      "levels": {
-        "prev_close": 63239.52,
-        "today_open": 63310.3,
-        "fill_target": 63239.52,
-        "t1_continuation": 67273.51,
-        "atr": 2642.14
-      },
-      "outcome": {
-        "next_day": false,
-        "filled": true
-      }
-    },
-    {
-      "symbol": "ETH",
-      "pattern": "Gap Fill",
-      "direction": "down",
-      "notes": "Gap +0.20% \u00b7 3.38 pts \u00b7 61.7\u00d7 median \u00b7 Ranging",
-      "levels": {
-        "prev_close": 1686.4,
-        "today_open": 1689.78,
-        "fill_target": 1686.4,
-        "t1_continuation": 1834.05,
-        "atr": 96.18
-      },
-      "outcome": {
-        "next_day": false,
-        "filled": true
       }
     },
     {
@@ -782,17 +789,22 @@
       "to": "09:00"
     },
     "opening_range": {
-      "from": "10:00",
-      "to": "10:00"
+      "from": "09:30",
+      "to": "09:30"
     },
     "session": {
-      "from": "10:00",
+      "from": "09:30",
       "to": "15:30"
     },
     "last_hour": {
       "from": "15:30",
       "to": "15:30"
     }
+  },
+  "vix": {
+    "current": 15.4,
+    "avg_20d": 16.91,
+    "ratio": 0.91
   },
   "vol_regime": {
     "label": "Normal",

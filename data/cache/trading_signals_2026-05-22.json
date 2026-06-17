@@ -1,38 +1,39 @@
 {
-  "generated": "2026-06-07T05:06:55.586160+00:00",
+  "generated": "2026-06-17T06:32:05.376377+00:00",
   "market_closed": false,
   "day_quality": {
-    "grade": "B",
+    "grade": "A",
     "scores": {
-      "total": 2,
-      "max": 4,
-      "rvol": {
+      "total": 5,
+      "max": 8,
+      "gap_range": {
         "score": 0,
-        "ratio": null,
-        "pm_vol_today": null,
-        "pm_vol_avg_20d": null
-      },
-      "range": {
-        "score": 0,
-        "ratio": null,
-        "pm_range_today": null,
-        "pm_range_avg_20d": null
-      },
-      "gap": {
-        "score": 0,
-        "ratio": 0.0,
+        "has_gap": false,
+        "has_pm_range": null,
         "gap_pts": 0.0,
+        "gap_ratio": 0.0,
         "median_gap": 2.35,
         "prior_close": 742.72,
-        "est_open": null
+        "est_open": null,
+        "pm_range_ratio": null,
+        "pm_range_today": null,
+        "pm_range_avg_20d": null
       },
       "structure": {
         "score": 2,
         "regime": "Trending"
       },
-      "has_data": false,
-      "has_rvol": false,
-      "has_range": false
+      "adr": {
+        "score": 2,
+        "adr_5d": 7.09,
+        "adr_20d": 5.93,
+        "ratio": 1.2
+      },
+      "alignment": {
+        "score": 1,
+        "detail": {}
+      },
+      "has_data": false
     }
   },
   "regime": {
@@ -49,6 +50,7 @@
       "low": 744.48,
       "close": 745.64,
       "volume": 41671800,
+      "volume_above_20d": false,
       "atr_14": 7.55,
       "atr_20d_avg": 7.04,
       "atr_above_avg": true,
@@ -99,6 +101,9 @@
         "day_range_pct": 0.6,
         "day_atr_multiple": 0.59
       },
+      "adr_20d": 5.93,
+      "adr_5d": 7.09,
+      "prev_range": 7.84,
       "premarket": {
         "high": null,
         "low": null,
@@ -117,6 +122,7 @@
       "low": 715.95,
       "close": 717.54,
       "volume": 32999600,
+      "volume_above_20d": false,
       "atr_14": 11.44,
       "atr_20d_avg": 10.05,
       "atr_above_avg": true,
@@ -167,6 +173,9 @@
         "day_range_pct": 0.86,
         "day_atr_multiple": 0.54
       },
+      "adr_20d": 8.88,
+      "adr_5d": 10.75,
+      "prev_range": 10.35,
       "premarket": {
         "high": null,
         "low": null,
@@ -185,6 +194,7 @@
       "low": 283.67,
       "close": 285.12,
       "volume": 23792000,
+      "volume_above_20d": false,
       "atr_14": 5.1,
       "atr_20d_avg": 4.5,
       "atr_above_avg": true,
@@ -235,6 +245,9 @@
         "day_range_pct": 1.04,
         "day_atr_multiple": 0.58
       },
+      "adr_20d": 4.23,
+      "adr_5d": 5.18,
+      "prev_range": 6.53,
       "premarket": {
         "high": null,
         "low": null,
@@ -253,6 +266,7 @@
       "low": 572.86,
       "close": 576.32,
       "volume": 7483200,
+      "volume_above_20d": false,
       "atr_14": 20.81,
       "atr_20d_avg": 16.15,
       "atr_above_avg": true,
@@ -303,6 +317,9 @@
         "day_range_pct": 1.68,
         "day_atr_multiple": 0.46
       },
+      "adr_20d": 15.31,
+      "adr_5d": 18.97,
+      "prev_range": 12.98,
       "premarket": {
         "high": null,
         "low": null,
@@ -321,6 +338,7 @@
       "low": 76833.04,
       "close": 77279.93,
       "volume": 19808387601,
+      "volume_above_20d": false,
       "atr_14": 1961.52,
       "atr_20d_avg": 1933.37,
       "atr_above_avg": true,
@@ -371,6 +389,9 @@
         "day_range_pct": 1.26,
         "day_atr_multiple": 0.5
       },
+      "adr_20d": 1941.97,
+      "adr_5d": 1927.63,
+      "prev_range": 1352.65,
       "premarket": {
         "high": null,
         "low": null,
@@ -389,6 +410,7 @@
       "low": 2090.52,
       "close": 2111.37,
       "volume": 10167436482,
+      "volume_above_20d": false,
       "atr_14": 76.2,
       "atr_20d_avg": 71.01,
       "atr_above_avg": true,
@@ -439,6 +461,9 @@
         "day_range_pct": 2.29,
         "day_atr_multiple": 0.63
       },
+      "adr_20d": 72.84,
+      "adr_5d": 75.7,
+      "prev_range": 65.98,
       "premarket": {
         "high": null,
         "low": null,
@@ -457,6 +482,7 @@
       "low": 412.0,
       "close": 413.82,
       "volume": 5500800,
+      "volume_above_20d": false,
       "atr_14": 7.16,
       "atr_20d_avg": 7.57,
       "atr_above_avg": false,
@@ -507,6 +533,9 @@
         "day_range_pct": 0.89,
         "day_atr_multiple": 0.51
       },
+      "adr_20d": 5.04,
+      "adr_5d": 5.79,
+      "prev_range": 6.47,
       "premarket": {
         "high": null,
         "low": null,
@@ -525,6 +554,7 @@
       "low": 67.8,
       "close": 68.36,
       "volume": 14355500,
+      "volume_above_20d": false,
       "atr_14": 3.3,
       "atr_20d_avg": 2.78,
       "atr_above_avg": true,
@@ -575,6 +605,9 @@
         "day_range_pct": 1.86,
         "day_atr_multiple": 0.38
       },
+      "adr_20d": 1.79,
+      "adr_5d": 1.91,
+      "prev_range": 2.44,
       "premarket": {
         "high": null,
         "low": null,
@@ -593,6 +626,7 @@
       "low": 138.71,
       "close": 140.92,
       "volume": 7416500,
+      "volume_above_20d": false,
       "atr_14": 6.71,
       "atr_20d_avg": 6.95,
       "atr_above_avg": false,
@@ -643,6 +677,9 @@
         "day_range_pct": 3.66,
         "day_atr_multiple": 0.76
       },
+      "adr_20d": 4.95,
+      "adr_5d": 6.85,
+      "prev_range": 10.03,
       "premarket": {
         "high": null,
         "low": null,
@@ -770,6 +807,11 @@
       "from": null,
       "to": null
     }
+  },
+  "vix": {
+    "current": 15.4,
+    "avg_20d": 16.91,
+    "ratio": 0.91
   },
   "vol_regime": {
     "label": "Elevated",
