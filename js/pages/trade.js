@@ -51,8 +51,9 @@ function renderHeader() {
     : (grade === 'A+' || grade === 'A') ? '#10b981'
     : grade === 'B' ? '#f59e0b' : '#ef4444';
   const gradeLabel = cacheData.market_closed ? 'Market Closed'
-    : (grade === 'A+' || grade === 'A') ? 'Favorable'
-    : grade === 'B' ? 'Selective' : 'Sit Out';
+    : grade === 'A+' ? 'Strong'
+    : grade === 'A'  ? 'Favorable'
+    : grade === 'B'  ? 'Selective' : 'Sit Out';
 
   document.getElementById('headerMeta').textContent = `as of ${genStr}`;
   document.getElementById('dayQualityBadge').innerHTML =
@@ -114,12 +115,13 @@ function renderDayQuality() {
   const max     = scores.max   ?? 8;
   const hasData = scores.has_data !== false;
 
-  const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
+  const gradeColor = (grade === 'A+' || grade === 'A') ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = grade === 'A+' ? 'Strong' : grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
 
-  const range = scores.range     || {};
-  const gap   = scores.gap       || {};
-  const struc = scores.structure || {};
+  const gapRange  = scores.gap_range  || {};
+  const struc     = scores.structure  || {};
+  const adrScore  = scores.adr        || {};
+  const alignScore = scores.alignment || {};
 
   const noDataMsg = '<span class="muted" style="font-size:0.8em;">No pre-market data</span>';
   const fmtVal = (n, suffix = '') => n != null ? n + suffix : '–';
@@ -129,9 +131,8 @@ function renderDayQuality() {
   // --- SPY price + overnight range chart (Step 1 always shows SPY) ---
   const spyD  = cacheData.symbols['SPY'] || {};
   const pmD   = spyD.premarket || {};
-  const gapD  = scores.gap || {};
-  const prX   = gapD.prior_close;
-  const eoX   = gapD.est_open;
+  const prX   = gapRange.prior_close;
+  const eoX   = gapRange.est_open;
   const pmH   = pmD.high;
   const pmL   = pmD.low;
   const lastPx = spyD.close;
@@ -192,33 +193,32 @@ function renderDayQuality() {
     <span style="font-size: 1.5em; font-weight: bold; color: ${gradeColor};">${total}/${max}</span>
   </div>`;
 
-  html += `<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+  // VIX context row
+  const vix = cacheData.vix || {};
+  if (vix.current != null) {
+    const vixColor = vix.ratio > 1.2 ? '#ef4444' : vix.ratio > 1.0 ? '#f59e0b' : '#10b981';
+    const vixLabel = vix.ratio > 1.2 ? 'Elevated' : vix.ratio > 1.0 ? 'Above avg' : 'Below avg';
+    html += `<div style="margin-bottom:12px; display:flex; align-items:baseline; gap:10px; flex-wrap:wrap;">
+      <span class="muted">VIX:</span>
+      <strong style="color:${vixColor};">${vix.current}</strong>
+      <span class="muted" style="font-size:0.8em;">${vix.ratio}× 20d avg (${vix.avg_20d}) — ${vixLabel}</span>
+    </div>`;
+  }
+
+  html += `<div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
 
     <div class="pill">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div class="muted">Overnight Range</div>
-        <span>${scoreDots(range.score ?? 0)}</span>
+        <div class="muted">Gap + PM Range</div>
+        <span>${scoreDots(gapRange.score ?? 0)}</span>
       </div>
-      <span style="font-weight:bold; color:${scoreColor(range.score ?? 0)}; font-size:1.1em;">
-        ${fmtVal(range.ratio, '×')}
+      <span style="font-weight:bold; color:${scoreColor(gapRange.score ?? 0)}; font-size:1.1em;">
+        ${gapRange.score === 2 ? 'Both' : gapRange.score === 1 ? 'One' : 'Neither'}
       </span>
       <div class="muted" style="font-size:0.8em; margin-top:4px;">
-        ${range.ratio != null
-          ? `$${range.pm_range_today} today · $${range.pm_range_avg_20d} 20d avg`
+        ${gapRange.gap_pts != null
+          ? `Gap $${gapRange.gap_pts} (${gapRange.gap_ratio}× med) · PM ${gapRange.pm_range_ratio != null ? gapRange.pm_range_ratio + '× avg' : '–'}`
           : noDataMsg}
-      </div>
-    </div>
-
-    <div class="pill">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div class="muted">Gap vs ATR</div>
-        <span>${scoreDots(gap.score ?? 0)}</span>
-      </div>
-      <span style="font-weight:bold; color:${scoreColor(gap.score ?? 0)}; font-size:1.1em;">
-        ${fmtVal(gap.ratio, '× gap med')}
-      </span>
-      <div class="muted" style="font-size:0.8em; margin-top:4px;">
-        ${gap.gap_pts != null ? `$${gap.gap_pts} gap · median $${gap.median_gap}` : 'No gap data'}
       </div>
     </div>
 
@@ -233,7 +233,63 @@ function renderDayQuality() {
       <div class="muted" style="font-size:0.8em; margin-top:4px;">Trending=2 · Ranging=1 · Choppy=0</div>
     </div>
 
+    <div class="pill">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <div class="muted">ADR Trend</div>
+        <span>${scoreDots(adrScore.score ?? 0)}</span>
+      </div>
+      <span style="font-weight:bold; color:${scoreColor(adrScore.score ?? 0)}; font-size:1.1em;">
+        ${adrScore.ratio != null ? (adrScore.ratio > 1.1 ? '▲ Expanding' : adrScore.ratio < 0.9 ? '▼ Contracting' : '→ Flat') : '–'}
+      </span>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">
+        ${adrScore.adr_5d != null ? `5d $${adrScore.adr_5d} · 20d $${adrScore.adr_20d}` : '–'}
+      </div>
+    </div>
+
+    <div class="pill">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <div class="muted">Index Alignment</div>
+        <span>${scoreDots(alignScore.score ?? 0)}</span>
+      </div>
+      <span style="font-weight:bold; color:${scoreColor(alignScore.score ?? 0)}; font-size:1.1em;">
+        ${alignScore.score === 2 ? 'Aligned' : alignScore.score === 1 ? 'Partial' : 'Diverging'}
+      </span>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">
+        ${Object.entries(alignScore.detail || {}).map(([s, d]) => `${s} ${d === 'up' ? '▲' : d === 'down' ? '▼' : '→'}`).join(' · ') || 'SPY · QQQ · IWM'}
+      </div>
+    </div>
+
   </div>`;
+
+  // ADR pill — SPY only, shows 20-day average daily range vs yesterday's actual range
+  const spySym   = cacheData.symbols['SPY'] || {};
+  const adr20    = spySym.adr_20d;
+  const adr5     = spySym.adr_5d;
+  const prevRng  = spySym.prev_range;
+  if (adr20 != null && prevRng != null) {
+    const ratio      = +(prevRng / adr20).toFixed(2);
+    const compressed = prevRng < adr20;
+    const rangeColor = compressed ? '#10b981' : '#ef4444';
+    const trendDir   = adr5 != null ? (adr5 > adr20 ? '▲ Expanding' : adr5 < adr20 ? '▼ Contracting' : '→ Flat') : '–';
+    const trendColor = adr5 != null ? (adr5 > adr20 ? '#ef4444' : adr5 < adr20 ? '#10b981' : '#6b7280') : '#6b7280';
+    html += `
+    <div class="pill" style="margin-bottom: 12px; display: flex; gap: 32px; align-items: flex-start;">
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Avg Daily Range (20d)</div>
+        <strong style="font-size:1.1em;">$${adr20}</strong>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Yesterday's Range</div>
+        <strong style="color:${rangeColor};">$${prevRng}</strong>
+        <span class="muted" style="font-size:0.8em; margin-left:6px;">${ratio}× ADR · ${compressed ? 'inside' : 'outside'}</span>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">5d vs 20d Trend</div>
+        <strong style="color:${trendColor};">${trendDir}</strong>
+        ${adr5 != null ? `<span class="muted" style="font-size:0.75em; margin-left:6px;">$${adr5} 5d avg</span>` : ''}
+      </div>
+    </div>`;
+  }
 
   if (!hasData) {
     html += `<div class="muted" style="font-size:0.8em;">
@@ -373,26 +429,26 @@ function scoreConfluences() {
     .map(p => {
       const sym      = p.symbol;
       const data     = cacheData.symbols[sym];
-      const squeeze  = data.squeeze     || { status: 'unknown', momentum: 0, momentum_increasing: false };
-      const vwap     = data.vwap        || { vwap: null, above_vwap: null, distance_pct: null };
+      const squeeze  = data.squeeze        || { status: 'unknown', momentum: 0, momentum_increasing: false };
+      const vwap     = data.vwap           || { vwap: null, above_vwap: null, distance_pct: null };
       const rsiDiv   = data.rsi_divergence || { signal: 'unknown' };
-      const tradeDay = new Date(cacheData.generated).getDay();
 
       const checks = {
-        'Volume > 20d avg': !!data.volume_above_20d,
-        'PM range active':  !!data.atr_above_avg,
-        'RSI extreme':      data.rsi_14 < 35 || data.rsi_14 > 65,
-        'MACD aligned':     p.direction === 'up' ? data.macd_histogram > 0 : data.macd_histogram < 0,
-        'MA(20) aligned':   p.direction === 'up' ? !!data.above_ma_20 : !data.above_ma_20,
-        'Day A or A+':      ['A', 'A+'].includes(cacheData.day_quality.grade),
-        'Regime matches':   true,
-        'Squeeze aligned':  squeeze.status !== 'none' && squeeze.status !== 'unknown' &&
-                            (p.direction === 'up' ? squeeze.momentum_increasing === true : squeeze.momentum_increasing === false),
-        'Weekday edge':     [2, 3, 4].includes(tradeDay),
+        'Volume > 20d avg (daily)': !!data.volume_above_20d,
+        'PM range active':          !!data.atr_above_avg,
+        'RSI extreme (daily)':      data.rsi_14 < 35 || data.rsi_14 > 65,
+        'MACD aligned (daily)':     p.direction === 'up' ? data.macd_histogram > 0 : data.macd_histogram < 0,
+        'MA(20) aligned (daily)':   p.direction === 'up' ? !!data.above_ma_20 : !data.above_ma_20,
+        'Day A or A+':              ['A', 'A+'].includes(cacheData.day_quality.grade),
+        'Regime matches':           true,
+        'Squeeze aligned (hourly)': squeeze.status !== 'none' && squeeze.status !== 'unknown' &&
+                                    (p.direction === 'up' ? squeeze.momentum_increasing === true : squeeze.momentum_increasing === false),
       };
 
-      const score = Object.values(checks).filter(Boolean).length;
-      return { symbol: sym, pattern: p.pattern, direction: p.direction, score, data, checks, squeeze, vwap, rsiDiv };
+      const score    = Object.values(checks).filter(Boolean).length;
+      const tradeDay = new Date(cacheData.generated).getDay();
+      const weekdayEdge = [2, 3, 4].includes(tradeDay);
+      return { symbol: sym, pattern: p.pattern, direction: p.direction, score, data, checks, squeeze, vwap, rsiDiv, weekdayEdge };
     })
     .sort((a, b) => b.score - a.score)
     .filter(x => x.score >= 3);
@@ -405,17 +461,21 @@ function scoreConfluences() {
     html = `<div style="display: flex; flex-wrap: wrap; gap: 12px;">`;
 
     scored.forEach(trade => {
-      const sc      = trade.score >= 7 ? '#10b981' : trade.score >= 5 ? '#f59e0b' : '#3b82f6';
-      const szLabel = trade.score >= 7 ? 'Full Size' : trade.score >= 5 ? '75% Size' : '50% Size';
+      const sc      = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
+      const szLabel = trade.score >= 6 ? 'Full Size' : trade.score >= 4 ? '75% Size' : '50% Size';
+      const wdBadge = trade.weekdayEdge
+        ? `<span style="background:#22242a; border:1px solid #10b981; color:#10b981; padding:1px 7px; border-radius:3px; font-size:0.75em; margin-left:6px;">Tue–Thu ✓</span>`
+        : `<span style="background:#22242a; border:1px solid #4b5563; color:#4b5563; padding:1px 7px; border-radius:3px; font-size:0.75em; margin-left:6px;">Mon/Fri</span>`;
 
       html += `
         <div style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
           <div style="font-weight: bold; font-size: 1.05em;">${trade.symbol}</div>
           <div style="font-size: 0.85em; color: #a7a7ad; margin-bottom: 8px;">${trade.pattern}</div>
-          <div style="margin-bottom: 10px;">
+          <div style="margin-bottom: 10px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
             <span style="background: ${sc}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">
-              ${trade.score}/9 ${getDotsHTML(trade.score, 9)}
+              ${trade.score}/8 ${getDotsHTML(trade.score, 8)}
             </span>
+            ${wdBadge}
           </div>
           <div style="font-size: 0.8em; font-weight: bold; color: ${sc}; margin-bottom: 6px;">${szLabel}</div>
           <div style="font-size: 0.8em;">`;
@@ -500,7 +560,7 @@ function renderRecommendations(scored) {
         target3 = `Trailing $${atrSt} (1x ATR)`;
       }
 
-      const sc           = trade.score >= 7 ? '#10b981' : trade.score >= 5 ? '#f59e0b' : '#3b82f6';
+      const sc           = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
       const vwapColor    = trade.vwap.above_vwap === null ? '#6b7280' : trade.vwap.above_vwap ? '#10b981' : '#ef4444';
       const vwapLabel    = trade.vwap.vwap !== null
         ? `$${trade.vwap.vwap.toFixed(2)} (${trade.vwap.distance_pct > 0 ? '+' : ''}${trade.vwap.distance_pct}%)`
@@ -517,7 +577,7 @@ function renderRecommendations(scored) {
                 ${trade.pattern} ${trade.direction}
               </span>
             </div>
-            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/9 ${getDotsHTML(trade.score, 9)}</span>
+            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/8 ${getDotsHTML(trade.score, 8)}</span>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; font-size: 0.85em;">
@@ -591,7 +651,7 @@ function renderPositionCalc(scored) {
 
   scored.forEach(trade => {
     const stopDist = trade.data.atr_14 * 1.5;
-    const szLabel  = trade.score >= 6 ? '100%' : trade.score >= 4 ? '75%' : '50%';
+    const szLabel  = trade.score >= 6 ? '100%' : trade.score >= 4 ? '75%' : '50%'; // out of 8
 
     html += `
       <div class="pill" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px;">
@@ -662,8 +722,8 @@ function renderEodOutcomes(scored) {
   // Section 1: Day Quality + SPY close
   const grade      = cacheData.day_quality.grade;
   const scores     = cacheData.day_quality.scores || {};
-  const gradeColor = grade === 'A' ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
+  const gradeColor = (grade === 'A+' || grade === 'A') ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
+  const gradeLabel = grade === 'A+' ? 'Strong' : grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
   const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
 
   const eodSpyClose  = cacheData.symbols?.['SPY']?.close;
@@ -687,10 +747,10 @@ function renderEodOutcomes(scored) {
   }
 
   let dqBody = spyCloseRow + `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
-    ${pill('Day Grade', `${grade} (${scores.total ?? '–'}/${scores.max ?? 6})`, gradeColor, gradeLabel)}
-    ${pill('PM Range',  scores.range?.ratio != null ? scores.range.ratio + '×' : '–', scoreColor(scores.range?.score ?? 0), null)}
-    ${pill('Gap vs ATR', scores.gap?.ratio != null ? scores.gap.ratio + '×' : '–',    scoreColor(scores.gap?.score ?? 0),   null)}
-    ${pill('Structure',  scores.structure?.regime ?? '–', scoreColor(scores.structure?.score ?? 0), null)}
+    ${pill('Day Grade',   `${grade} (${scores.total ?? '–'}/${scores.max ?? 8})`, gradeColor, gradeLabel)}
+    ${pill('Gap+PM Range', scores.gap_range?.score != null ? ['Neither','One','Both'][scores.gap_range.score] : '–', scoreColor(scores.gap_range?.score ?? 0), null)}
+    ${pill('Structure',   scores.structure?.regime ?? '–', scoreColor(scores.structure?.score ?? 0), null)}
+    ${pill('Alignment',   scores.alignment?.score === 2 ? 'Aligned' : scores.alignment?.score === 1 ? 'Partial' : 'Diverging', scoreColor(scores.alignment?.score ?? 0), null)}
   </div>`;
   if (grade === 'C') {
     dqBody += `<div style="margin-top:10px; color:#ef4444; font-size:0.9em;">No trades taken — day did not meet quality gate.</div>`;
@@ -780,7 +840,7 @@ function renderEodOutcomes(scored) {
   } else {
     const confCards = scored.map(trade => {
       const sc      = trade.score >= 7 ? '#10b981' : trade.score >= 5 ? '#f59e0b' : '#3b82f6';
-      const szLabel = trade.score >= 7 ? 'Full Size' : trade.score >= 5 ? '75% Size' : '50% Size';
+      const szLabel = trade.score >= 6 ? 'Full Size' : trade.score >= 4 ? '75% Size' : '50% Size';
       const checksHTML = Object.entries(trade.checks).map(([k, v]) =>
         `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
       ).join('');
@@ -793,7 +853,7 @@ function renderEodOutcomes(scored) {
                 ${trade.pattern} ${trade.direction === 'up' ? '▲' : trade.direction === 'down' ? '▼' : '—'}
               </span>
             </div>
-            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/9 ${getDotsHTML(trade.score, 9)}</span>
+            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/8 ${getDotsHTML(trade.score, 8)}</span>
           </div>
           <div style="font-size: 0.8em; font-weight: bold; color: ${sc}; margin-bottom: 8px;">${szLabel}</div>
           <div style="font-size: 0.8em;">${checksHTML}</div>
@@ -816,7 +876,7 @@ function renderEodOutcomes(scored) {
       const isNextDay   = oc.next_day;
       const scoredEntry = scored ? scored.find(s => s.symbol === p.symbol && s.pattern === p.pattern) : null;
       const score       = scoredEntry ? scoredEntry.score : 0;
-      const sc          = score >= 7 ? '#10b981' : score >= 5 ? '#f59e0b' : score >= 3 ? '#3b82f6' : '#6b7280';
+      const sc          = score >= 6 ? '#10b981' : score >= 4 ? '#f59e0b' : score >= 2 ? '#3b82f6' : '#6b7280';
       const dirArrow    = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
 
       let levelsInner = '';
