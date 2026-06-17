@@ -4,11 +4,12 @@ Run manually or via GitHub Actions workflow_dispatch.
 Skips dates that already have a cache file unless --force is passed.
 
 Usage:
-  python3 backfill_trading_history.py           # skip existing
-  python3 backfill_trading_history.py --force   # regenerate all
+  python3 scripts/backfill_trading_history.py           # skip existing
+  python3 scripts/backfill_trading_history.py --force   # regenerate all
+
+Requires SQLite to be seeded first: python3 -m pipeline.run seed
 """
 import argparse
-import subprocess
 from datetime import date, timedelta
 from pathlib import Path
 import csv
@@ -48,6 +49,12 @@ def main():
                         help='How many calendar days back to backfill (default: 90)')
     args = parser.parse_args()
 
+    from pipeline.db_manager import DBManager
+    from pipeline.generators.trading_generator import TradingGenerator
+
+    db = DBManager()
+    generator = TradingGenerator(db, cache_dir=CACHE_DIR)
+
     start, end = get_backfill_date_range(lookback_days=args.days)
     print(f"Backfilling {start} → {end}{' (force)' if args.force else ''}")
     skipped = generated = 0
@@ -58,7 +65,7 @@ def main():
             skipped += 1
             continue
         print(f"  generating {d}...")
-        subprocess.run(['python3', 'scripts/generate_trading_cache.py', '--date', d.isoformat()], check=True)
+        generator.generate(target_date=d)
         generated += 1
     print(f"\nDone — {generated} generated, {skipped} skipped")
 

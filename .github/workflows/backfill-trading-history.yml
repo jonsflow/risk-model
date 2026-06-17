@@ -30,7 +30,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install yfinance
+        run: pip install yfinance python-dotenv fredapi
 
       - name: Pull latest changes
         run: |
@@ -40,6 +40,9 @@ jobs:
 
       - name: Fetch latest daily data
         run: python3 scripts/fetch_data.py
+
+      - name: Seed SQLite from existing CSVs
+        run: python3 -m pipeline.run seed
 
       - name: Run backfill
         run: |

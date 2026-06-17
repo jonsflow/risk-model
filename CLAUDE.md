@@ -10,7 +10,7 @@ Risk Model is a static GitHub Pages site with eight pages covering divergence si
 |------|------|-------------|----------|
 | Divergence | `index.html` / `js/pages/divergence.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
 | Macro Model | `pages/macro.html` / `js/pages/macro.js` | Yahoo Finance CSVs + cache JSON | Python (`generate_cache.py`) |
-| Trade | `pages/trade.html` / `js/pages/trade.js` | trading_signals.json cache | Python (`generate_trading_cache.py`) |
+| Trade | `pages/trade.html` / `js/pages/trade.js` | trading_signals.json cache | Python (`pipeline/generators/trading_generator.py`) |
 | Credit Spread | `pages/credit.html` / `js/pages/credit.js` | FRED CSV (`BAMLH0A0HYM2`) | Client-side JS |
 | Gov Data | `pages/gov_data.html` / `js/pages/gov_data.js` | FRED CSVs (`data/fred/`) | Client-side JS |
 | FOMC | `pages/fomc.html` / `js/pages/fomc.js` | FRED CSVs (`data/fred/`) | Client-side JS |
@@ -19,11 +19,25 @@ Risk Model is a static GitHub Pages site with eight pages covering divergence si
 
 ## Data Pipelines
 
-### Yahoo Finance Pipeline (Divergence + Macro)
-1. GitHub Actions runs daily at 21:00 UTC (4 PM ET)
-2. `fetch_data.py` fetches hourly + daily CSVs via `yfinance`
-3. `generate_cache.py` runs all pivot/divergence/regime analysis → `data/cache/*.json`
-4. JS fetches cache JSON and renders — no recomputation in browser
+### v2 SQLite Pipeline (active — all pages)
+
+Active workflow: `.github/workflows/update-data-v2.yml`
+Schedule: 14:00 UTC (pre-market) + 21:00 UTC (post-market) weekdays
+
+Steps:
+1. `python3 -m pipeline.run seed` — seed SQLite from existing CSVs (idempotent)
+2. `python3 -m pipeline.run fetch` — fetch Yahoo Finance + FRED → SQLite
+3. `python3 -m pipeline.run generate` — run all generators → `data/cache/*.json`
+4. Commit and push JSON cache files
+
+**Single source of truth rule**: Each page's analysis logic lives in exactly one file under `pipeline/generators/`. Never create a parallel implementation in `scripts/`. Always read the workflow YAML first to confirm what runs in production before editing any generator.
+
+| Generator | Output |
+|---|---|
+| `pipeline/generators/trading_generator.py` | `trading_signals.json` + dated history files |
+| `pipeline/generators/divergence_generator.py` | `divergence_*.json` |
+| `pipeline/generators/macro_generator.py` | `macro_*.json` |
+| `pipeline/generators/correlation_generator.py` | `correlation_*.json` |
 
 ### FRED Pipeline (Credit + Gov Data)
 1. `fetch_fred.py` fetches FRED series via `fredapi` → `data/fred/{SERIES_ID}.csv`
@@ -31,19 +45,17 @@ Risk Model is a static GitHub Pages site with eight pages covering divergence si
 3. Config driven by `config/fred_config.json` (categories structure with `display` and `freq` fields)
 4. JS loads CSVs directly and computes stats client-side — no cache files needed
 
-```bash
-# Fetch FRED data locally
-source .env && python fetch_fred.py
-# or: python-dotenv handles .env automatically
-python fetch_fred.py
-```
-
 ## Development Commands
 
 ```bash
-# Yahoo Finance data
+# v2 pipeline (trading signals + all caches)
+python3 -m pipeline.run seed      # seed SQLite from existing CSVs
+python3 -m pipeline.run fetch     # fetch fresh data → SQLite
+python3 -m pipeline.run generate  # regenerate all cache files from SQLite
+
+# Yahoo Finance CSVs (divergence + macro, legacy path)
 python3 scripts/fetch_data.py          # fetch hourly + daily CSVs
-python3 scripts/generate_cache.py      # regenerate all cache files (required after logic changes)
+python3 scripts/generate_cache.py      # regenerate divergence/macro cache files
 
 # FRED data
 python3 scripts/fetch_fred.py          # fetch all FRED series (reads FRED_API_KEY from .env)
@@ -84,7 +96,6 @@ python3 -m http.server 8000
 │   ├── fetch_trading_hourly.py # Fetches intraday data for trading signals
 │   ├── fetch_fred.py           # Fetches FRED series → data/fred/*.csv
 │   ├── generate_cache.py       # Runs all analysis → data/cache/*.json
-│   ├── generate_trading_cache.py
 │   ├── generate_correlation_cache.py
 │   ├── cache_utils.py          # Shared cache utilities
 │   └── refresh.sh              # Full refresh (run from repo root)
@@ -101,7 +112,9 @@ python3 -m http.server 8000
 │       ├── BAMLH0A0HYM2.csv
 │       ├── T10Y2Y.csv, DGS10.csv, VIXCLS.csv, ...
 │       └── (32 series total)
-└── .github/workflows/update-data.yml
+└── .github/workflows/
+    ├── update-data-v2.yml      # active: 14:00 + 21:00 UTC weekdays
+    └── backfill-trading-history.yml  # manual: regenerate historical dated cache files
 ```
 
 ## Symbols & Series
@@ -140,8 +153,9 @@ Configurable via dropdowns: lookback (20/50/100d), pivot mode (recent/highest/hi
 ## Common Gotchas
 
 1. **CORS errors**: Use `python3 -m http.server 8000`, not `file://`
-2. **Cache missing error**: Run `python3 generate_cache.py` — JS has no analysis fallback
+2. **Cache missing error**: Run `python3 -m pipeline.run generate` — JS has no analysis fallback
 3. **FRED key not found**: Ensure `.env` has `FRED_API_KEY=...` and `python-dotenv` is installed
 4. **Weekly change doubled**: `findPriorPoint` uses date-based lookback — daily=1, weekly=6, monthly=25 days
 5. **BTC has 24/7 data**: ~700 hourly bars vs ~143 for stocks
-6. **Workflow schedule**: cron `0 21 * * 1-5` = 21:00 UTC weekdays (4 PM ET)
+6. **Workflow schedule**: two runs — 14:00 UTC (pre-market, 9 AM ET) and 21:00 UTC (post-market, 4 PM ET) weekdays
+7. **Trading signal logic**: lives only in `pipeline/generators/trading_generator.py`. `scripts/generate_trading_cache.py` has been deleted. Always check the workflow YAML before editing any generator to confirm what actually runs in production.

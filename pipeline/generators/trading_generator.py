@@ -311,15 +311,54 @@ def _compute_premarket_metrics(hourly_points, target_date):
     }
 
 
-def _grade_day_quality(points, hourly_points, target_date, regime_label):
+def _load_vix() -> dict:
+    path = DATA_DIR / 'fred' / 'VIXCLS.csv'
+    if not path.exists():
+        return None
+    import csv as _csv
+    vals = []
+    with open(path, newline='') as f:
+        for row in _csv.DictReader(f):
+            try:
+                v = row.get('Value', '').strip()
+                if v and v != '.':
+                    vals.append(float(v))
+            except ValueError:
+                continue
+    if not vals:
+        return None
+    current = vals[-1]
+    avg_20d = sum(vals[-20:]) / min(20, len(vals))
+    return {'current': round(current, 2), 'avg_20d': round(avg_20d, 2),
+            'ratio': round(current / avg_20d, 2) if avg_20d else None}
+
+
+def _compute_alignment_score(regime_symbols, hourly_data) -> tuple:
+    directions = {}
+    for sym in regime_symbols:
+        h = hourly_data.get(sym, [])
+        if len(h) >= 2:
+            chg = (h[-1][1]['close'] - h[0][1]['close']) / h[0][1]['close']
+            directions[sym] = 'up' if chg > 0.005 else 'down' if chg < -0.005 else 'flat'
+    non_flat = [d for d in directions.values() if d != 'flat']
+    if not non_flat:
+        score = 1
+    else:
+        majority = max(set(non_flat), key=non_flat.count)
+        agree = non_flat.count(majority)
+        score = 2 if agree == len(non_flat) else (1 if agree >= 2 else 0)
+    return score, directions
+
+
+def _grade_day_quality(points, hourly_points, target_date, regime_label,
+                       adr_5d=None, adr_20d=None, alignment_score=1, alignment_detail=None):
     if len(points) < 2:
         return 'B', {'total': 4, 'max': 8, 'has_data': False}
     prior_close = points[-1][1]['close']
-    atr_vals    = _calculate_atr(points, 14)
-    atr_14      = atr_vals[-1][1] if atr_vals else 0.0
+
+    # Factor 1: Gap + Overnight Range (combined)
     pm = _compute_premarket_metrics(hourly_points, target_date)
-    rvol_score  = pm['rvol']['score']
-    range_score = pm['range']['score']
+    has_pm_range = pm.get('has_range') and (pm['range'].get('ratio') or 0) >= 0.7
     hist_gaps = [abs(points[i][1]['open'] - points[i-1][1]['close'])
                  for i in range(max(1, len(points) - 20), len(points))]
     median_gap = statistics.median(hist_gaps) if hist_gaps else 0.0
@@ -336,22 +375,35 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label):
                 break
     gap_pts   = abs(est_open - prior_close) if est_open is not None else 0.0
     gap_ratio = round(gap_pts / median_gap, 2) if median_gap > 0 else 0.0
-    gap_score = 2 if gap_ratio > 1.5 else (1 if gap_ratio >= 0.5 else 0)
+    has_gap   = gap_ratio >= 0.5
+    gap_range_score = 2 if (has_gap and has_pm_range) else 1 if (has_gap or has_pm_range) else 0
+
+    # Factor 2: Structure
     structure_score = {'Trending': 2, 'Ranging': 1, 'Choppy': 0}.get(regime_label, 1)
-    total = rvol_score + range_score + gap_score + structure_score
-    avail_max = 4
-    if pm.get('has_rvol'):  avail_max += 2
-    if pm.get('has_range'): avail_max += 2
-    grade = 'A' if total >= round(avail_max * 0.75) else ('B' if total >= round(avail_max * 0.5) else 'C')
+
+    # Factor 3: ADR Trend (5d vs 20d)
+    adr_ratio = (adr_5d / adr_20d) if (adr_5d and adr_20d) else 1.0
+    adr_score = 2 if adr_ratio > 1.1 else 1 if adr_ratio >= 0.9 else 0
+
+    # Factor 4: Index Alignment (pre-computed)
+    total = gap_range_score + structure_score + adr_score + alignment_score
+    grade = 'A+' if total >= 7 else 'A' if total >= 5 else 'B' if total >= 3 else 'C'
+
     scores = {
-        'total': total, 'max': avail_max,
-        'rvol':      {**pm['rvol'],  'score': rvol_score},
-        'range':     {**pm['range'], 'score': range_score},
-        'gap': {'score': gap_score, 'ratio': gap_ratio, 'gap_pts': round(gap_pts, 2),
-                'median_gap': round(median_gap, 2), 'prior_close': round(prior_close, 2),
-                'est_open': round(est_open, 2) if est_open is not None else None},
+        'total': total, 'max': 8,
+        'gap_range': {
+            'score': gap_range_score, 'has_gap': has_gap, 'has_pm_range': has_pm_range,
+            'gap_pts': round(gap_pts, 2), 'gap_ratio': gap_ratio,
+            'median_gap': round(median_gap, 2), 'prior_close': round(prior_close, 2),
+            'est_open': round(est_open, 2) if est_open is not None else None,
+            'pm_range_ratio': pm['range'].get('ratio'),
+            'pm_range_today': pm['range'].get('pm_range_today'),
+            'pm_range_avg_20d': pm['range'].get('pm_range_avg_20d'),
+        },
         'structure': {'score': structure_score, 'regime': regime_label},
-        'has_data': pm['has_data'], 'has_rvol': pm.get('has_rvol', False), 'has_range': pm.get('has_range', False),
+        'adr': {'score': adr_score, 'adr_5d': adr_5d, 'adr_20d': adr_20d, 'ratio': round(adr_ratio, 2)},
+        'alignment': {'score': alignment_score, 'detail': alignment_detail or {}},
+        'has_data': pm.get('has_data', False),
     }
     return grade, scores
 
@@ -499,6 +551,9 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
     }
 
     output['regime'] = _detect_regime(regime_symbols, daily_data, hourly_data)
+    output['vix']    = _load_vix()
+
+    _align_score, _align_detail = _compute_alignment_score(regime_symbols, hourly_data)
 
     for symbol in symbols:
         points = daily_data.get(symbol, [])
@@ -554,12 +609,23 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         rsi_div         = _calculate_rsi_divergence(hourly) if hourly else {'signal': 'unknown', 'description': 'No hourly data'}
         eod_outcome     = _calculate_eod_outcomes(points, hourly, gap, atr_current)
 
+        # ADR: average daily range on prior complete bars only
+        _prior = points[:-1]
+        _ranges = [p[1]['high'] - p[1]['low'] for p in _prior if p[1]['high'] and p[1]['low']]
+        adr_20d    = round(sum(_ranges[-20:]) / min(20, len(_ranges)), 2) if _ranges else None
+        adr_5d     = round(sum(_ranges[-5:])  / min(5,  len(_ranges)), 2) if _ranges else None
+        prev_range = round(_ranges[-1], 2) if _ranges else None
+
         if symbol == 'SPY':
             if is_weekend:
                 output['day_quality'] = {'grade': 'N/A', 'scores': {}}
             else:
                 regime_label = output['regime'].get('label', 'Ranging')
-                day_grade, scores = _grade_day_quality(points[:-1], hourly, spy_date, regime_label)
+                day_grade, scores = _grade_day_quality(
+                    points[:-1], hourly, spy_date, regime_label,
+                    adr_5d=adr_5d, adr_20d=adr_20d,
+                    alignment_score=_align_score, alignment_detail=_align_detail,
+                )
                 output['day_quality'] = {'grade': day_grade, 'scores': scores}
             output['vol_regime'] = _classify_vol_regime(points, atr_current)
 
@@ -570,6 +636,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             'low':     round(today_ohlcv['low'],   2),
             'close':   round(today_ohlcv['close'], 2),
             'volume':  today_ohlcv['volume'],
+            'volume_above_20d': today_ohlcv['volume'] > vol_20d_avg if vol_20d_avg > 0 else False,
             'atr_14':  round(atr_current, 2),
             'atr_20d_avg': round(atr_20day_avg, 2),
             'atr_above_avg': pm_range_active,
@@ -591,6 +658,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             },
             'engulfing': engulfing, 'squeeze': squeeze, 'vwap': vwap, 'rsi_divergence': rsi_div,
             'eod_outcome': eod_outcome,
+            'adr_20d': adr_20d, 'adr_5d': adr_5d, 'prev_range': prev_range,
             'premarket': {
                 'high':  round(max(b[1]['high'] for b in pm_bars_sym), 2) if pm_bars_sym else None,
                 'low':   round(min(b[1]['low']  for b in pm_bars_sym), 2) if pm_bars_sym else None,
