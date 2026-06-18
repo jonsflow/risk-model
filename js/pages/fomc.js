@@ -136,6 +136,8 @@ function renderRateHistoryChart(data, decisions) {
       shape: d.type === 'Hike' ? 'arrowUp' : 'arrowDown',
       text: `${d.bps > 0 ? '+' : ''}${d.bps}`, size: 0.8,
     }));
+  markers.push({ time: '2026-06-17', position: 'aboveBar', color: '#f97316', shape: 'circle', text: 'Warsh', size: 0.8 });
+  markers.sort((a, b) => (a.time < b.time ? -1 : 1));
   LC.createSeriesMarkers(area, markers);
 
   chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
