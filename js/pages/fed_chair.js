@@ -2,7 +2,7 @@
 import { renderNav }       from '../components/Navigation.js';
 import { fetchFredBundle } from '../core/api.js';
 import {
-  createFomcChart, fitWithRightPadding, addChartLegend, hexToRgba, colors,
+  createFomcChart, fitWithRightPadding, addChartLegend, addZoomControls, hexToRgba, colors,
 } from '../core/chart-utils.js';
 
 const LC = window.LightweightCharts;
@@ -265,7 +265,6 @@ function renderBalanceSheetChart(data) {
 
   const chart = makeChart('chart-balance-sheet', 300);
   if (!chart) return;
-  chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
 
   const area = chart.addSeries(LC.AreaSeries, {
     lineColor: colors.balSheet,
@@ -301,6 +300,9 @@ function renderBalanceSheetChart(data) {
       { date: ERA.warshFirstFomc, label: 'First FOMC',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-balance-sheet', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderInflationChart(data) {
@@ -351,6 +353,9 @@ function renderInflationChart(data) {
       { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-inflation', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderBreakevenChart(data) {
@@ -396,6 +401,9 @@ function renderBreakevenChart(data) {
       { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-breakevens', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderRateChart(data) {
@@ -408,7 +416,6 @@ function renderRateChart(data) {
 
   const chart = makeChart('chart-rates', 260);
   if (!chart) return;
-  chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
 
   const area = chart.addSeries(LC.AreaSeries, {
     lineColor: colors.rate,
@@ -421,11 +428,7 @@ function renderRateChart(data) {
   addChartLegend('chart-rates', [
     { label: 'EFFR', color: colors.rate, value: `${combined[combined.length - 1].value.toFixed(2)}%` },
   ]);
-
-  const viewFrom   = '2008-01-01';
-  const visible    = combined.filter(p => p.time >= viewFrom).length;
-  chart.timeScale().applyOptions({ rightOffset: Math.ceil(visible * 0.04) });
-  chart.timeScale().setVisibleRange({ from: viewFrom, to: combined[combined.length - 1].time });
+  fitWithRightPadding(chart, combined.length, 0.04);
 
   addChartOverlay(chart, 'chart-rates', {
     regions: [
@@ -439,6 +442,9 @@ function renderRateChart(data) {
       { date: ERA.warshFirstFomc, label: 'First FOMC',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-rates', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderReservesChart(data) {
@@ -484,6 +490,9 @@ function renderReservesChart(data) {
       { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-reserves', [
+    { label: '2Y', years: 2 }, { label: '5Y', years: 5 },
+  ]);
 }
 
 // ------------------------------------------------------------------

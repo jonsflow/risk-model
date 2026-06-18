@@ -2,7 +2,7 @@
 import { renderNav }       from '../components/Navigation.js';
 import { fetchFredBundle } from '../core/api.js';
 import {
-  createFomcChart, fitWithRightPadding, addChartLegend, hexToRgba, colors,
+  createFomcChart, fitWithRightPadding, addChartLegend, addZoomControls, hexToRgba, colors,
 } from '../core/chart-utils.js';
 
 const LC = window.LightweightCharts;
@@ -140,13 +140,10 @@ function renderRateHistoryChart(data, decisions) {
   markers.sort((a, b) => (a.time < b.time ? -1 : 1));
   LC.createSeriesMarkers(area, markers);
 
-  chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
-
-  const viewFrom = nYearsAgo(15);
-  const lastTime = combined[combined.length - 1].time;
-  const visible  = combined.filter(p => p.time >= viewFrom).length;
-  chart.timeScale().applyOptions({ rightOffset: Math.ceil(visible * 0.05) });
-  chart.timeScale().setVisibleRange({ from: viewFrom, to: lastTime });
+  fitWithRightPadding(chart, combined.length, 0.05);
+  addZoomControls(chart, 'chart-rate-history', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderRateCorridorChart(data) {
@@ -185,6 +182,9 @@ function renderRateCorridorChart(data) {
     ...(effr.length ? [{ label: 'EFFR', color: colors.effr,      value: `${effr[effr.length-1].value.toFixed(2)}%` }] : []),
   ]);
   fitWithRightPadding(chart, dfedtaru.length);
+  addZoomControls(chart, 'chart-rate-corridor', [
+    { label: '1Y', years: 1 }, { label: '2Y', years: 2 },
+  ], 1);
 }
 
 function renderSepChart(data) {
@@ -207,6 +207,9 @@ function renderSepChart(data) {
     size: 2, text: `${p.value.toFixed(2)}%`,
   })));
   fitWithRightPadding(chart, fedtarmd.length, 0.005);
+  addZoomControls(chart, 'chart-sep', [
+    { label: '5Y', years: 5 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderReverseRepoChart(data) {
@@ -227,6 +230,9 @@ function renderReverseRepoChart(data) {
     { label: 'O/N RRP', color: colors.rrp, value: `$${rrpo[rrpo.length-1].value.toFixed(0)}B` },
   ]);
   fitWithRightPadding(chart, rrpo.length, 0.04);
+  addZoomControls(chart, 'chart-rrpo', [
+    { label: '3Y', years: 3 }, { label: '5Y', years: 5 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderBalanceSheetChart(data) {
@@ -268,6 +274,9 @@ function renderBalanceSheetChart(data) {
   if (wshomcb?.length)  entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(wshomcb[wshomcb.length-1].value/1000).toFixed(0)}B` });
   addChartLegend('chart-balance-sheet', entries);
   fitWithRightPadding(chart, walcl.length);
+  addZoomControls(chart, 'chart-balance-sheet', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderReserveBalancesChart(data) {
@@ -288,6 +297,9 @@ function renderReserveBalancesChart(data) {
     { label: 'Reserves', color: colors.reserves, value: `$${wresbal[wresbal.length-1].value.toFixed(0)}B` },
   ]);
   fitWithRightPadding(chart, wresbal.length, 0.03);
+  addZoomControls(chart, 'chart-wresbal', [
+    { label: '3Y', years: 3 }, { label: '5Y', years: 5 }, { label: 'Max', years: null },
+  ]);
 }
 
 async function init() {

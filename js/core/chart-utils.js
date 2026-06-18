@@ -103,6 +103,39 @@ export function addChartLegend(containerId, entries) {
   el.appendChild(row);
 }
 
+export function addZoomControls(chart, containerId, presets, defaultIdx = 0) {
+  const container = document.getElementById(containerId);
+  if (!container) return;
+
+  const bar = document.createElement('div');
+  bar.style.cssText = 'display:flex;justify-content:flex-end;gap:3px;margin-bottom:4px';
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  const btns = presets.map(p => {
+    const btn = document.createElement('button');
+    btn.textContent = p.label;
+    btn.style.cssText = 'background:none;border:1px solid transparent;border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;color:#6b7280;cursor:pointer;letter-spacing:0.04em';
+    btn.addEventListener('click', () => {
+      btns.forEach(b => { b.style.color = '#6b7280'; b.style.borderColor = 'transparent'; });
+      btn.style.color = '#e9e9ea';
+      btn.style.borderColor = '#4b5563';
+      if (p.years === null) {
+        chart.timeScale().fitContent();
+      } else {
+        const d = new Date();
+        d.setFullYear(d.getFullYear() - p.years);
+        chart.timeScale().setVisibleRange({ from: d.toISOString().slice(0, 10), to: today });
+      }
+    });
+    bar.appendChild(btn);
+    return btn;
+  });
+
+  container.parentNode.insertBefore(bar, container);
+  btns[defaultIdx].click();
+}
+
 export function hexToRgba(hex, alpha) {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
