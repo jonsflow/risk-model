@@ -256,6 +256,24 @@ def _detect_outside_day(points):
     return 'none'
 
 
+def _classify_day_type(points):
+    """Classify the most recent completed bar's range vs the prior bar.
+
+    'inside'  — range fully contained in the prior bar (compression / coil).
+    'outside' — range engulfs the prior bar on both sides (expansion).
+    'normal'  — neither (ordinary higher/lower bar). Direction is intentionally
+    not distinguished here; candle-pattern refinement comes later.
+    """
+    if len(points) < 2:
+        return 'normal'
+    today, prev = points[-1][1], points[-2][1]
+    if today['high'] <= prev['high'] and today['low'] >= prev['low']:
+        return 'inside'
+    if today['high'] > prev['high'] and today['low'] < prev['low']:
+        return 'outside'
+    return 'normal'
+
+
 def _detect_engulfing(points, vol_20d_avg):
     if len(points) < 2: return 'none'
     prev, curr = points[-2][1], points[-1][1]
@@ -351,7 +369,7 @@ def _compute_alignment_score(regime_symbols, hourly_data) -> tuple:
 
 
 def _grade_day_quality(points, hourly_points, target_date, regime_label,
-                       adr_5d=None, adr_20d=None, alignment_score=1, alignment_detail=None):
+                       adr_8d=None, adr_20d=None, alignment_score=1, alignment_detail=None):
     if len(points) < 2:
         return 'B', {'total': 4, 'max': 8, 'has_data': False}
     prior_close = points[-1][1]['close']
@@ -380,9 +398,14 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label,
 
     # Factor 2: Structure
     structure_score = {'Trending': 2, 'Ranging': 1, 'Choppy': 0}.get(regime_label, 1)
+    day_type = _classify_day_type(points)
 
-    # Factor 3: ADR Trend (5d vs 20d)
-    adr_ratio = (adr_5d / adr_20d) if (adr_5d and adr_20d) else 1.0
+    # Factor 3: Intraday range trend (8d vs 20d high-low, gap-excluded). The
+    # overnight gap is scored separately in gap_range, so this factor isolates
+    # intraday follow-through — a gap day with a tight tape reads as compressed.
+    # The 8-day recent window (~two weeks) tracks the current regime more closely
+    # than a 5-day window while staying less noisy.
+    adr_ratio = (adr_8d / adr_20d) if (adr_8d and adr_20d) else 1.0
     adr_score = 2 if adr_ratio > 1.1 else 1 if adr_ratio >= 0.9 else 0
 
     # Factor 4: Index Alignment (pre-computed)
@@ -400,8 +423,8 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label,
             'pm_range_today': pm['range'].get('pm_range_today'),
             'pm_range_avg_20d': pm['range'].get('pm_range_avg_20d'),
         },
-        'structure': {'score': structure_score, 'regime': regime_label},
-        'adr': {'score': adr_score, 'adr_5d': adr_5d, 'adr_20d': adr_20d, 'ratio': round(adr_ratio, 2)},
+        'structure': {'score': structure_score, 'regime': regime_label, 'day_type': day_type},
+        'adr': {'score': adr_score, 'adr_8d': adr_8d, 'adr_20d': adr_20d, 'ratio': round(adr_ratio, 2)},
         'alignment': {'score': alignment_score, 'detail': alignment_detail or {}},
         'has_data': pm.get('has_data', False),
     }
@@ -421,6 +444,8 @@ def _classify_vol_regime(points, atr_current):
 
 
 def _detect_regime(symbols, daily_data, hourly_data):
+    # Index divergence sets the alignment flag only — it no longer forces "Choppy".
+    # The penalty for divergence is already applied separately via _compute_alignment_score.
     aligned = True
     first_dir = None
     for sym in symbols:
@@ -433,9 +458,9 @@ def _detect_regime(symbols, daily_data, hourly_data):
             elif curr_dir != first_dir and curr_dir != 'flat' and first_dir != 'flat':
                 aligned = False
                 break
-    if not aligned:
-        return {'label': 'Choppy', 'direction': 'mixed', 'atr_trend': 'unknown', 'index_alignment': 'diverging'}
+    index_alignment = 'aligned' if aligned else 'diverging'
 
+    # Always derive structure from SPY's MA20 position + slope.
     label, direction = 'Ranging', 'sideways'
     spy_points = daily_data.get('SPY', [])
     if len(spy_points) >= 20:
@@ -447,6 +472,7 @@ def _detect_regime(symbols, daily_data, hourly_data):
             if close > ma20_now and ma20_now > ma20_ten: label, direction = 'Trending', 'up'
             elif close < ma20_now and ma20_now < ma20_ten: label, direction = 'Trending', 'down'
 
+    # Always compute ATR trend (expanding / contracting / normal).
     atr_trend = 'normal'
     if spy_points:
         atr_vals = _calculate_atr(spy_points, 14)
@@ -456,7 +482,17 @@ def _detect_regime(symbols, daily_data, hourly_data):
             if atr_now > atr_avg * 1.1:   atr_trend = 'expanding'
             elif atr_now < atr_avg * 0.9: atr_trend = 'contracting'
 
-    return {'label': label, 'direction': direction, 'atr_trend': atr_trend, 'index_alignment': 'aligned'}
+    # Last completed daily bar's structure (spy_points[-1] is the forming session).
+    day_type = _classify_day_type(spy_points[:-1]) if len(spy_points) >= 3 else 'normal'
+
+    # "Choppy" now means a genuinely sideways tape with a shrinking range —
+    # not merely that the indices disagreed on direction today. An outside day is
+    # an expansion event, so it cannot be chop even if ATR still reads contracting.
+    if label == 'Ranging' and atr_trend == 'contracting' and day_type != 'outside':
+        label, direction = 'Choppy', 'mixed'
+
+    return {'label': label, 'direction': direction, 'atr_trend': atr_trend,
+            'index_alignment': index_alignment, 'day_type': day_type}
 
 
 def _calculate_eod_outcomes(points, hourly_points, gap, atr_14):
@@ -613,7 +649,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         _prior = points[:-1]
         _ranges = [p[1]['high'] - p[1]['low'] for p in _prior if p[1]['high'] and p[1]['low']]
         adr_20d    = round(sum(_ranges[-20:]) / min(20, len(_ranges)), 2) if _ranges else None
-        adr_5d     = round(sum(_ranges[-5:])  / min(5,  len(_ranges)), 2) if _ranges else None
+        adr_8d     = round(sum(_ranges[-8:])  / min(8,  len(_ranges)), 2) if _ranges else None
         prev_range = round(_ranges[-1], 2) if _ranges else None
 
         if symbol == 'SPY':
@@ -623,7 +659,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 regime_label = output['regime'].get('label', 'Ranging')
                 day_grade, scores = _grade_day_quality(
                     points[:-1], hourly, spy_date, regime_label,
-                    adr_5d=adr_5d, adr_20d=adr_20d,
+                    adr_8d=adr_8d, adr_20d=adr_20d,
                     alignment_score=_align_score, alignment_detail=_align_detail,
                 )
                 output['day_quality'] = {'grade': day_grade, 'scores': scores}
@@ -658,7 +694,8 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             },
             'engulfing': engulfing, 'squeeze': squeeze, 'vwap': vwap, 'rsi_divergence': rsi_div,
             'eod_outcome': eod_outcome,
-            'adr_20d': adr_20d, 'adr_5d': adr_5d, 'prev_range': prev_range,
+            'adr_20d': adr_20d, 'adr_8d': adr_8d, 'prev_range': prev_range,
+            'day_type': _classify_day_type(points[:-1]),
             'premarket': {
                 'high':  round(max(b[1]['high'] for b in pm_bars_sym), 2) if pm_bars_sym else None,
                 'low':   round(min(b[1]['low']  for b in pm_bars_sym), 2) if pm_bars_sym else None,
