@@ -2,13 +2,13 @@
 import { renderNav }       from '../components/Navigation.js';
 import { fetchFredBundle } from '../core/api.js';
 import {
-  createFomcChart, fitWithRightPadding, addChartLegend, hexToRgba, colors,
+  createFomcChart, fitWithRightPadding, addChartLegend, addZoomControls, hexToRgba, colors,
 } from '../core/chart-utils.js';
 
 const LC = window.LightweightCharts;
 
 const FEDCHAIR_SERIES = [
-  'WALCL', 'TREAST', 'MBST',
+  'WALCL', 'TREAST', 'WSHOMCB',
   'WRESBAL', 'RRPONTSYD',
   'FEDFUNDS', 'EFFR',
   'PCEPILFE', 'CPILFESL',
@@ -19,14 +19,17 @@ const FEDCHAIR_SERIES = [
 const CHART_START = '2007-01-01';
 
 const ERA = {
-  powellStart:   '2018-02-05',
-  covidQE:       '2020-03-15',
-  faitAdopted:   '2020-08-27',
-  firstHike:     '2022-03-17',
-  qtBegins:      '2022-06-01',
-  firstCut:      '2024-09-19',
-  faitAbandoned: '2025-08-22',
-  warshHearing:  '2026-04-21',
+  powellStart:    '2018-02-05',
+  covidQE:        '2020-03-15',
+  faitAdopted:    '2020-08-27',
+  firstHike:      '2022-03-17',
+  qtBegins:       '2022-06-01',
+  firstCut:       '2024-09-19',
+  faitAbandoned:  '2025-08-22',
+  warshHearing:   '2026-04-21',
+  powellLastFomc: '2026-04-29',
+  warshConfirmed: '2026-05-13',
+  warshFirstFomc: '2026-06-17',
 };
 
 const TIMELINE = [
@@ -41,6 +44,9 @@ const TIMELINE = [
   { date: '2024-09-19', event: 'First cut of easing cycle (−50bps)',         context: 'Fed pivots; Core PCE still above 2%',                  era: 'powell' },
   { date: '2025-08-22', event: 'FAIT abandoned — strict 2% target restored', context: 'Jackson Hole 2025; ahead of Warsh era',                era: 'powell' },
   { date: '2026-04-21', event: 'Warsh Senate confirmation hearing',          context: '"QT for cuts" · eliminate dot plot · vows independence', era: 'warsh' },
+  { date: '2026-04-29', event: "Powell's last FOMC meeting",                 context: 'Rates held 3.50–3.75%. Final meeting under Powell.',      era: 'powell' },
+  { date: '2026-05-13', event: 'Warsh confirmed as Fed Chair',               context: 'Senate confirmation vote. Powell remains on Board of Governors.', era: 'warsh' },
+  { date: '2026-06-17', event: 'Warsh first FOMC: rates held, statement overhaul', context: 'Held 3.50–3.75% (12-0). Statement cut to ~130 words, forward guidance removed. Dot plot: 9/18 project ≥1 hike. Five task forces announced.', era: 'warsh' },
 ];
 
 const fedChairCharts = new Map();
@@ -259,7 +265,6 @@ function renderBalanceSheetChart(data) {
 
   const chart = makeChart('chart-balance-sheet', 300);
   if (!chart) return;
-  chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
 
   const area = chart.addSeries(LC.AreaSeries, {
     lineColor: colors.balSheet,
@@ -275,25 +280,29 @@ function renderBalanceSheetChart(data) {
   });
 
   const treast = data['TREAST'];
-  const mbst   = data['MBST'];
+  const wshomcb = data['WSHOMCB'];
   const entries = [{ label: 'Total Assets', color: colors.balSheet, value: `$${(walcl[walcl.length-1].value/1000).toFixed(0)}B` }];
-  if (treast?.length) entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
-  if (mbst?.length)   entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(mbst[mbst.length-1].value/1000).toFixed(0)}B` });
+  if (treast?.length)  entries.push({ label: 'Treasuries', color: colors.sofr, value: `$${(treast[treast.length-1].value/1000).toFixed(0)}B` });
+  if (wshomcb?.length) entries.push({ label: 'MBS',        color: colors.mbs,  value: `$${(wshomcb[wshomcb.length-1].value/1000).toFixed(0)}B` });
   addChartLegend('chart-balance-sheet', entries);
   fitWithRightPadding(chart, walcl.length, 0.04);
 
   addChartOverlay(chart, 'chart-balance-sheet', {
     regions: [
-      { from: ERA.powellStart, to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
-      { from: ERA.warshHearing, to: '2030-01-01',    color: 'rgba(249,115,22,0.05)'  },
+      { from: ERA.powellStart,    to: ERA.warshConfirmed, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshConfirmed, to: '2030-01-01',       color: 'rgba(249,115,22,0.05)'  },
     ],
     lines: [
-      { date: ERA.powellStart,  label: 'Powell',   color: '#7aa2f7' },
-      { date: ERA.covidQE,      label: 'COVID QE', color: '#ef4444' },
-      { date: ERA.qtBegins,     label: 'QT',       color: '#34d399' },
-      { date: ERA.warshHearing, label: 'Warsh',    color: '#f97316' },
+      { date: ERA.powellStart,    label: 'Powell',      color: '#7aa2f7' },
+      { date: ERA.covidQE,        label: 'COVID QE',    color: '#ef4444' },
+      { date: ERA.qtBegins,       label: 'QT',          color: '#34d399' },
+      { date: ERA.warshConfirmed, label: 'Warsh',       color: '#f97316' },
+      { date: ERA.warshFirstFomc, label: 'First FOMC',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-balance-sheet', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderInflationChart(data) {
@@ -335,15 +344,18 @@ function renderInflationChart(data) {
 
   addChartOverlay(chart, 'chart-inflation', {
     regions: [
-      { from: ERA.powellStart, to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
-      { from: ERA.warshHearing, to: '2030-01-01',    color: 'rgba(249,115,22,0.05)'  },
+      { from: ERA.powellStart,    to: ERA.warshConfirmed, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshConfirmed, to: '2030-01-01',       color: 'rgba(249,115,22,0.05)'  },
     ],
     lines: [
-      { date: ERA.powellStart,  label: 'Powell', color: '#7aa2f7' },
-      { date: ERA.firstHike,    label: 'Hike',   color: '#ef4444' },
-      { date: ERA.warshHearing, label: 'Warsh',  color: '#f97316' },
+      { date: ERA.powellStart,    label: 'Powell', color: '#7aa2f7' },
+      { date: ERA.firstHike,      label: 'Hike',   color: '#ef4444' },
+      { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-inflation', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderBreakevenChart(data) {
@@ -379,16 +391,19 @@ function renderBreakevenChart(data) {
 
   addChartOverlay(chart, 'chart-breakevens', {
     regions: [
-      { from: ERA.powellStart, to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
-      { from: ERA.warshHearing, to: '2030-01-01',    color: 'rgba(249,115,22,0.05)'  },
+      { from: ERA.powellStart,    to: ERA.warshConfirmed, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshConfirmed, to: '2030-01-01',       color: 'rgba(249,115,22,0.05)'  },
     ],
     lines: [
-      { date: ERA.powellStart,  label: 'Powell', color: '#7aa2f7' },
-      { date: ERA.firstHike,    label: 'Hike',   color: '#ef4444' },
-      { date: ERA.firstCut,     label: 'Cut',    color: '#34d399' },
-      { date: ERA.warshHearing, label: 'Warsh',  color: '#f97316' },
+      { date: ERA.powellStart,    label: 'Powell', color: '#7aa2f7' },
+      { date: ERA.firstHike,      label: 'Hike',   color: '#ef4444' },
+      { date: ERA.firstCut,       label: 'Cut',    color: '#34d399' },
+      { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-breakevens', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderRateChart(data) {
@@ -401,7 +416,6 @@ function renderRateChart(data) {
 
   const chart = makeChart('chart-rates', 260);
   if (!chart) return;
-  chart.applyOptions({ handleScroll: { pressedMouseMove: true, horzTouchDrag: true, mouseWheel: false } });
 
   const area = chart.addSeries(LC.AreaSeries, {
     lineColor: colors.rate,
@@ -414,23 +428,23 @@ function renderRateChart(data) {
   addChartLegend('chart-rates', [
     { label: 'EFFR', color: colors.rate, value: `${combined[combined.length - 1].value.toFixed(2)}%` },
   ]);
-
-  const viewFrom   = '2008-01-01';
-  const visible    = combined.filter(p => p.time >= viewFrom).length;
-  chart.timeScale().applyOptions({ rightOffset: Math.ceil(visible * 0.04) });
-  chart.timeScale().setVisibleRange({ from: viewFrom, to: combined[combined.length - 1].time });
+  fitWithRightPadding(chart, combined.length, 0.04);
 
   addChartOverlay(chart, 'chart-rates', {
     regions: [
-      { from: ERA.powellStart, to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
-      { from: ERA.warshHearing, to: '2030-01-01',    color: 'rgba(249,115,22,0.05)'  },
+      { from: ERA.powellStart,    to: ERA.warshConfirmed, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshConfirmed, to: '2030-01-01',       color: 'rgba(249,115,22,0.05)'  },
     ],
     lines: [
-      { date: ERA.powellStart,  label: 'Powell', color: '#7aa2f7' },
-      { date: ERA.faitAdopted,  label: 'FAIT',   color: '#f59e0b' },
-      { date: ERA.warshHearing, label: 'Warsh',  color: '#f97316' },
+      { date: ERA.powellStart,    label: 'Powell',      color: '#7aa2f7' },
+      { date: ERA.faitAdopted,    label: 'FAIT',        color: '#f59e0b' },
+      { date: ERA.warshConfirmed, label: 'Warsh',       color: '#f97316' },
+      { date: ERA.warshFirstFomc, label: 'First FOMC',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-rates', [
+    { label: '5Y', years: 5 }, { label: '10Y', years: 10 }, { label: 'Max', years: null },
+  ]);
 }
 
 function renderReservesChart(data) {
@@ -468,14 +482,17 @@ function renderReservesChart(data) {
 
   addChartOverlay(chart, 'chart-reserves', {
     regions: [
-      { from: ERA.powellStart, to: ERA.warshHearing, color: 'rgba(122,162,247,0.05)' },
-      { from: ERA.warshHearing, to: '2030-01-01',    color: 'rgba(249,115,22,0.05)'  },
+      { from: ERA.powellStart,    to: ERA.warshConfirmed, color: 'rgba(122,162,247,0.05)' },
+      { from: ERA.warshConfirmed, to: '2030-01-01',       color: 'rgba(249,115,22,0.05)'  },
     ],
     lines: [
-      { date: ERA.powellStart,  label: 'Powell', color: '#7aa2f7' },
-      { date: ERA.warshHearing, label: 'Warsh',  color: '#f97316' },
+      { date: ERA.powellStart,    label: 'Powell', color: '#7aa2f7' },
+      { date: ERA.warshConfirmed, label: 'Warsh',  color: '#f97316' },
     ],
   });
+  addZoomControls(chart, 'chart-reserves', [
+    { label: '2Y', years: 2 }, { label: '5Y', years: 5 },
+  ]);
 }
 
 // ------------------------------------------------------------------
