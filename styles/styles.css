@@ -41,6 +41,23 @@ h1 {
   min-width: 200px;
 }
 
+/* Trade page responsive helpers */
+.metric-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+.metric-grid .pill { min-width: 0; }
+.trade-card {
+  flex: 1 1 360px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+@media (max-width: 768px) {
+  body.trade-page { padding: 14px; }
+  .trade-card { flex-basis: 100%; }
+}
+
 .signal {
   font-size: 18px;
   margin-top: 12px;

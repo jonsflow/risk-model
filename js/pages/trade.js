@@ -15,6 +15,17 @@ function isWeekend(dateStr) {
   return day === 0 || day === 6;
 }
 
+// Last-day candle structure: inside (compression) / outside (expansion) / normal.
+function dayTypeHTML(dayType) {
+  const map = {
+    inside:  { label: 'Inside (compression)', color: '#eab308' },
+    outside: { label: 'Outside (expansion)',  color: '#f97316' },
+    normal:  { label: 'Normal',               color: '#6b7280' },
+  };
+  const d = map[dayType] || map.normal;
+  return `<span style="color:${d.color}; font-weight:bold;">${d.label}</span>`;
+}
+
 function getDotsHTML(filled, total) {
   let dots = '';
   for (let i = 0; i < total; i++) dots += i < filled ? '●' : '○';
@@ -205,7 +216,7 @@ function renderDayQuality() {
     </div>`;
   }
 
-  html += `<div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+  html += `<div class="metric-grid" style="margin-bottom: 12px;">
 
     <div class="pill">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
@@ -230,19 +241,19 @@ function renderDayQuality() {
       <span style="font-weight:bold; color:${scoreColor(struc.score ?? 0)}; font-size:1.1em;">
         ${struc.regime ?? '–'}
       </span>
-      <div class="muted" style="font-size:0.8em; margin-top:4px;">Trending=2 · Ranging=1 · Choppy=0</div>
+      <div class="muted" style="font-size:0.8em; margin-top:4px;">Last day: ${dayTypeHTML(struc.day_type)}</div>
     </div>
 
     <div class="pill">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div class="muted">ADR Trend</div>
+        <div class="muted">Intraday Range <span style="font-size:0.85em;">(ex-gap)</span></div>
         <span>${scoreDots(adrScore.score ?? 0)}</span>
       </div>
       <span style="font-weight:bold; color:${scoreColor(adrScore.score ?? 0)}; font-size:1.1em;">
         ${adrScore.ratio != null ? (adrScore.ratio > 1.1 ? '▲ Expanding' : adrScore.ratio < 0.9 ? '▼ Contracting' : '→ Flat') : '–'}
       </span>
       <div class="muted" style="font-size:0.8em; margin-top:4px;">
-        ${adrScore.adr_5d != null ? `5d $${adrScore.adr_5d} · 20d $${adrScore.adr_20d}` : '–'}
+        ${adrScore.adr_8d != null ? `8d $${adrScore.adr_8d} · 20d $${adrScore.adr_20d}` : '–'}
       </div>
     </div>
 
@@ -264,16 +275,18 @@ function renderDayQuality() {
   // ADR pill — SPY only, shows 20-day average daily range vs yesterday's actual range
   const spySym   = cacheData.symbols['SPY'] || {};
   const adr20    = spySym.adr_20d;
-  const adr5     = spySym.adr_5d;
+  const adr8     = spySym.adr_8d;
   const prevRng  = spySym.prev_range;
   if (adr20 != null && prevRng != null) {
     const ratio      = +(prevRng / adr20).toFixed(2);
     const compressed = prevRng < adr20;
     const rangeColor = compressed ? '#10b981' : '#ef4444';
-    const trendDir   = adr5 != null ? (adr5 > adr20 ? '▲ Expanding' : adr5 < adr20 ? '▼ Contracting' : '→ Flat') : '–';
-    const trendColor = adr5 != null ? (adr5 > adr20 ? '#ef4444' : adr5 < adr20 ? '#10b981' : '#6b7280') : '#6b7280';
+    // Intraday range trend: 8d vs 20d high-low (gap-excluded). More range = more
+    // tradeable follow-through, so expanding is green to match the score pill.
+    const trendDir   = adr8 != null ? (adr8 > adr20 ? '▲ Expanding' : adr8 < adr20 ? '▼ Contracting' : '→ Flat') : '–';
+    const trendColor = adr8 != null ? (adr8 > adr20 ? '#10b981' : adr8 < adr20 ? '#ef4444' : '#6b7280') : '#6b7280';
     html += `
-    <div class="pill" style="margin-bottom: 12px; display: flex; gap: 32px; align-items: flex-start;">
+    <div class="pill" style="margin-bottom: 12px; display: flex; gap: 16px 32px; align-items: flex-start; flex-wrap: wrap;">
       <div>
         <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Avg Daily Range (20d)</div>
         <strong style="font-size:1.1em;">$${adr20}</strong>
@@ -281,12 +294,12 @@ function renderDayQuality() {
       <div>
         <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Yesterday's Range</div>
         <strong style="color:${rangeColor};">$${prevRng}</strong>
-        <span class="muted" style="font-size:0.8em; margin-left:6px;">${ratio}× ADR · ${compressed ? 'inside' : 'outside'}</span>
+        <span class="muted" style="font-size:0.8em; margin-left:6px;">${ratio}× ADR · ${compressed ? 'below avg' : 'above avg'}</span>
       </div>
       <div>
-        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">5d vs 20d Trend</div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Intraday Range Trend</div>
         <strong style="color:${trendColor};">${trendDir}</strong>
-        ${adr5 != null ? `<span class="muted" style="font-size:0.75em; margin-left:6px;">$${adr5} 5d avg</span>` : ''}
+        ${adr8 != null ? `<span class="muted" style="font-size:0.75em; margin-left:6px;">$${adr8} 8d avg</span>` : ''}
       </div>
     </div>`;
   }
@@ -315,7 +328,7 @@ function renderRegime() {
   };
 
   document.getElementById('step2Content').innerHTML = `
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+    <div class="metric-grid" style="margin-bottom: 16px;">
       <div class="pill">
         <div class="muted">Regime</div>
         <span style="font-weight: bold; background: ${regimeColors[regime.label]}; color: white; padding: 4px 8px; border-radius: 4px; display: inline-block;">
@@ -335,6 +348,10 @@ function renderRegime() {
         <span style="color: ${regime.index_alignment === 'aligned' ? '#10b981' : '#ef4444'};">
           ${regime.index_alignment}
         </span>
+      </div>
+      <div class="pill">
+        <div class="muted">Last Day</div>
+        ${dayTypeHTML(regime.day_type)}
       </div>
     </div>
     <div style="background: #22242a; padding: 12px; border-radius: 4px; border-left: 4px solid ${regimeColors[regime.label]};">
@@ -468,7 +485,7 @@ function scoreConfluences() {
         : `<span style="background:#22242a; border:1px solid #4b5563; color:#4b5563; padding:1px 7px; border-radius:3px; font-size:0.75em; margin-left:6px;">Mon/Fri</span>`;
 
       html += `
-        <div style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
           <div style="font-weight: bold; font-size: 1.05em;">${trade.symbol}</div>
           <div style="font-size: 0.85em; color: #a7a7ad; margin-bottom: 8px;">${trade.pattern}</div>
           <div style="margin-bottom: 10px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
@@ -569,7 +586,7 @@ function renderRecommendations(scored) {
       const rsidivLabels = { bullish: '▲ Bullish', bearish: '▼ Bearish', both: '⚡ Both', none: 'None', unknown: 'N/A' };
 
       html += `
-        <div style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <div>
               <strong style="font-size: 1.1em;">${trade.symbol}</strong>
@@ -654,7 +671,7 @@ function renderPositionCalc(scored) {
     const szLabel  = trade.score >= 6 ? '100%' : trade.score >= 4 ? '75%' : '50%'; // out of 8
 
     html += `
-      <div class="pill" style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 12px;">
+      <div class="pill metric-grid">
         <div>
           <div class="muted">${trade.symbol}</div>
           <strong class="symSize_${trade.symbol}">—</strong>
@@ -746,7 +763,7 @@ function renderEodOutcomes(scored) {
     </div>`;
   }
 
-  let dqBody = spyCloseRow + `<div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px;">
+  let dqBody = spyCloseRow + `<div class="metric-grid">
     ${pill('Day Grade',   `${grade} (${scores.total ?? '–'}/${scores.max ?? 8})`, gradeColor, gradeLabel)}
     ${pill('Gap+PM Range', scores.gap_range?.score != null ? ['Neither','One','Both'][scores.gap_range.score] : '–', scoreColor(scores.gap_range?.score ?? 0), null)}
     ${pill('Structure',   scores.structure?.regime ?? '–', scoreColor(scores.structure?.score ?? 0), null)}
@@ -767,7 +784,7 @@ function renderEodOutcomes(scored) {
   };
   const rCol = regimeColors[regime.label] || '#6b7280';
   html += sec('2 — Market Regime', `
-    <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:10px; margin-bottom:10px;">
+    <div class="metric-grid" style="margin-bottom:10px;">
       ${pill('Regime', regime.label, rCol, null)}
       ${pill('Direction', regime.direction, '#e2e8f0', null)}
       ${pill('ATR Trend', regime.atr_trend, '#e2e8f0', null)}
@@ -817,7 +834,7 @@ function renderEodOutcomes(scored) {
       }
 
       return `
-        <div style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+        <div class="trade-card" style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <div>
               <strong style="font-size: 1.1em;">${p.symbol}</strong>
@@ -845,7 +862,7 @@ function renderEodOutcomes(scored) {
         `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
       ).join('');
       return `
-        <div style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
             <div>
               <strong style="font-size: 1.1em;">${trade.symbol}</strong>
@@ -902,7 +919,7 @@ function renderEodOutcomes(scored) {
       }
 
       return `
-        <div style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px; width: 400px; box-sizing: border-box;">
+        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
             <div>
               <strong style="font-size: 1.1em;">${p.symbol}</strong>
@@ -910,7 +927,7 @@ function renderEodOutcomes(scored) {
                 ${p.pattern} ${dirArrow}
               </span>
             </div>
-            ${score > 0 ? `<span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${score}/9 ${getDotsHTML(score, 9)}</span>` : ''}
+            ${score > 0 ? `<span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${score}/8 ${getDotsHTML(score, 8)}</span>` : ''}
           </div>
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; font-size: 0.85em;">
             <div><div class="muted">Close</div><strong>$${d.close}</strong></div>
