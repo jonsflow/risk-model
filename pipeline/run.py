@@ -33,12 +33,14 @@ def cmd_fetch(args):
 
 
 def cmd_generate(args):
+    from pipeline.generators.prices_generator import PricesGenerator
     from pipeline.generators.divergence_generator import DivergenceGenerator
     from pipeline.generators.macro_generator import MacroGenerator
     from pipeline.generators.trading_generator import TradingGenerator
     from pipeline.generators.correlation_generator import CorrelationGenerator
 
     db = DBManager()
+    PricesGenerator(db).run()
     DivergenceGenerator(db).run()
     MacroGenerator(db).run()
     TradingGenerator(db).run()

@@ -18,33 +18,6 @@ let PAIRS     = [];
 let SYMBOLS   = [];
 let TREND_ASSETS = [];
 
-// ------------------------------------------------------------------
-// CSV loading (needed for chart rendering — price data not in cache)
-// ------------------------------------------------------------------
-
-async function loadCsvPoints(path, cacheMode = 'default') {
-  const opts = cacheMode === 'default' ? {} : { cache: cacheMode };
-  const r    = await fetch(path, opts);
-  if (!r.ok) throw new Error(`Fetch failed ${r.status} for ${path}`);
-  const lines = (await r.text()).trim().split(/\r?\n/);
-  lines.shift();
-  const points = [];
-  for (const line of lines) {
-    const parts = line.split(',');
-    if (parts.length < 5) continue;
-    const hasTime = parts.length >= 7 && parts[1].includes(':');
-    let date, close;
-    if (hasTime) { [date,,,,, close] = parts; }
-    else         { [date,,,, close] = parts; }
-    if (!date || !close || date === 'Date' || close === 'Close') continue;
-    const t = Math.floor(new Date(date + 'T00:00:00Z').getTime() / 1000);
-    const c = Number(close);
-    if (!Number.isFinite(t) || !Number.isFinite(c)) continue;
-    points.push([t, c]);
-  }
-  points.sort((a, b) => a[0] - b[0]);
-  return points;
-}
 
 // ------------------------------------------------------------------
 // MA calculation
@@ -281,17 +254,10 @@ async function init() {
     SYMBOLS     = (config.symbols || []).map(s => s.symbol.toLowerCase());
     TREND_ASSETS = config.trend_assets || [];
 
-    // Check for new data version
-    let csvCacheMode = 'default';
     try {
       const r = await fetch('./data/last_updated.txt', { cache: 'no-store' });
       if (r.ok) {
         const rawVersion = (await r.text()).trim();
-        const storedVersion = localStorage.getItem('risk_data_version') || '';
-        if (rawVersion !== storedVersion) {
-          csvCacheMode = 'no-cache';
-          localStorage.setItem('risk_data_version', rawVersion);
-        }
         const d = new Date(rawVersion.replace(' UTC', 'Z').replace(' ', 'T'));
         document.getElementById('meta').textContent = `Last updated: ${d.toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })}`;
       }
@@ -300,8 +266,10 @@ async function init() {
     }
 
     await Promise.all(SYMBOLS.map(async sym => {
-      try { dataCache[sym] = await loadCsvPoints(`./data/${sym}.csv`, csvCacheMode); }
-      catch (_) { dataCache[sym] = []; }
+      try {
+        const data = await fetchCache(`data/cache/prices_${sym}.json`);
+        dataCache[sym] = data.prices || [];
+      } catch (_) { dataCache[sym] = []; }
     }));
 
     renderPairColumns();
