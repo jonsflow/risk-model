@@ -495,6 +495,66 @@ def _detect_regime(symbols, daily_data, hourly_data):
             'index_alignment': index_alignment, 'day_type': day_type}
 
 
+def _resolve_prior_setups(daily_points):
+    """Detect Engulfing/Outside Day setups on the second-to-last bar and resolve
+    against the last bar's high/low. `points[-2]` fires the setup, `points[-1]`
+    is the execution session ("next session" from the setup's perspective).
+
+    Emits per-pattern: entry, stop, t1, (t2), triggered, stop_hit, hit_t1, hit_t2.
+    Returns [] if there aren't enough bars or no next-day pattern fired.
+    """
+    if len(daily_points) < 3:
+        return []
+    prior_slice   = daily_points[:-1]
+    setup_bar     = daily_points[-2][1]
+    execution_bar = daily_points[-1][1]
+
+    prior_atr_vals = _calculate_atr(prior_slice, 14)
+    prior_atr = prior_atr_vals[-1][1] if prior_atr_vals else 0.0
+    prior_vols = [p[1]['volume'] for p in prior_slice[-20:]]
+    prior_vol_20d = sum(prior_vols) / len(prior_vols) if prior_vols else 0
+
+    resolutions = []
+
+    def _resolve(is_up, entry, stop, t1, t2=None):
+        hi, lo = execution_bar['high'], execution_bar['low']
+        triggered = (hi >= entry) if is_up else (lo <= entry)
+        stop_hit  = triggered and ((lo <= stop) if is_up else (hi >= stop))
+        hit_t1    = triggered and ((hi >= t1) if is_up else (lo <= t1))
+        hit_t2    = triggered and (t2 is not None) and ((hi >= t2) if is_up else (lo <= t2))
+        return {'triggered': triggered, 'stop_hit': stop_hit, 'hit_t1': hit_t1, 'hit_t2': hit_t2}
+
+    eng = _detect_engulfing(prior_slice, prior_vol_20d)
+    if eng in ['bullish', 'bearish'] and prior_atr > 0:
+        is_up = eng == 'bullish'
+        mult  = 1 if is_up else -1
+        entry = round(setup_bar['high'] if is_up else setup_bar['low'], 2)
+        stop  = round(setup_bar['low']  if is_up else setup_bar['high'], 2)
+        t1    = round(entry + 1.5 * prior_atr * mult, 2)
+        t2    = round(entry + 2.0 * prior_atr * mult, 2)
+        resolutions.append({
+            'pattern': 'Engulfing', 'direction': 'up' if is_up else 'down',
+            'entry': entry, 'stop': stop, 't1': t1, 't2': t2,
+            **_resolve(is_up, entry, stop, t1, t2),
+        })
+
+    od = _detect_outside_day(prior_slice)
+    if od in ['up', 'down']:
+        is_up = od == 'up'
+        mult  = 1 if is_up else -1
+        entry = round(setup_bar['high'] if is_up else setup_bar['low'], 2)
+        stop  = round(setup_bar['low']  if is_up else setup_bar['high'], 2)
+        od_range = setup_bar['high'] - setup_bar['low']
+        t1    = round(entry + 1.5 * od_range * mult, 2)
+        resolutions.append({
+            'pattern': 'Outside Day', 'direction': 'up' if is_up else 'down',
+            'entry': entry, 'stop': stop, 't1': t1,
+            **_resolve(is_up, entry, stop, t1),
+        })
+
+    return resolutions
+
+
 def _calculate_eod_outcomes(points, hourly_points, gap, atr_14):
     result = {
         'orb_high': None, 'orb_low': None, 'orb_breached_up': False, 'orb_breached_down': False,
@@ -694,6 +754,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             },
             'engulfing': engulfing, 'squeeze': squeeze, 'vwap': vwap, 'rsi_divergence': rsi_div,
             'eod_outcome': eod_outcome,
+            'prior_setups': _resolve_prior_setups(points),
             'adr_20d': adr_20d, 'adr_8d': adr_8d, 'prev_range': prev_range,
             'day_type': _classify_day_type(points[:-1]),
             'premarket': {
@@ -713,6 +774,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         orb_watch = (not orb_has_levels) and output['regime'].get('label') == 'Trending' and pm_range_active
 
         gap_pattern_name = gap_direction = gap_notes = gap_levels = None
+        gap_continuation_hits = {}
         if gap['gap_significant'] and gap['gap_type'] != 'none':
             market_regime = output['regime'].get('label', 'Ranging')
             is_up_gap = gap['gap_type'] == 'up'
@@ -724,9 +786,18 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             if gap['gap_strong'] and market_regime == 'Trending':
                 gap_pattern_name, gap_direction = 'Gap Continuation', gap['gap_type']
                 gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · Trending"
+                t1_cont = round(today_open_val + 1.5 * atr_current * mult, 2)
+                t2_cont = round(today_open_val + 2.0 * atr_current * mult, 2)
                 gap_levels = {'prev_close': prev_close_val, 'today_open': today_open_val,
-                              't1_continuation': round(today_open_val + 1.5 * atr_current * mult, 2),
-                              't2_continuation': round(today_open_val + 2.0 * atr_current * mult, 2), 'atr': round(atr_current, 2)}
+                              't1_continuation': t1_cont, 't2_continuation': t2_cont,
+                              'atr': round(atr_current, 2)}
+                # Resolve continuation targets against today's session extremes.
+                # Up gap: continuation up → check today's high. Down gap: check today's low.
+                probe = today_ohlcv['high'] if is_up_gap else today_ohlcv['low']
+                gap_continuation_hits = {
+                    'hit_t1_continuation': (probe >= t1_cont) if is_up_gap else (probe <= t1_cont),
+                    'hit_t2_continuation': (probe >= t2_cont) if is_up_gap else (probe <= t2_cont),
+                }
             else:
                 gap_pattern_name, gap_direction = 'Gap Fill', ('down' if is_up_gap else 'up')
                 gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · {market_regime}"
@@ -753,25 +824,30 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 'levels': orb_levels,
                 'outcome': {'next_day': False, 'breached': eod_outcome.get('orb_breached', False),
                             'direction': eod_outcome.get('orb_direction', 'none'),
-                            'hit_t1': eod_outcome.get('orb_hit_t1', False), 'filled': eod_outcome.get('gap_filled', False)},
+                            'hit_t1': eod_outcome.get('orb_hit_t1', False),
+                            'filled': eod_outcome.get('gap_filled', False),
+                            **gap_continuation_hits},
             })
         elif orb_watch and gap_pattern_name:
             output['active_patterns'].append({
                 'symbol': symbol, 'pattern': f"ORB + {gap_pattern_name}", 'direction': gap_direction,
                 'notes': f"Entry: ORB breakout · {gap_notes}",
                 'levels': {**gap_levels, 'entry': 'ORB breakout at open'},
-                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False)},
+                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False),
+                            **gap_continuation_hits},
             })
         elif orb_watch:
             output['active_patterns'].append({
                 'symbol': symbol, 'pattern': 'ORB', 'direction': 'watch',
-                'notes': "Trending regime · PM range active · no gap", 'levels': {}, 'outcome': {},
+                'notes': "Trending regime · PM range active · no gap", 'levels': {},
+                'outcome': {'no_trade': True, 'reason': 'Range < 0.75× ATR'},
             })
         elif gap_pattern_name:
             output['active_patterns'].append({
                 'symbol': symbol, 'pattern': gap_pattern_name, 'direction': gap_direction,
                 'notes': gap_notes, 'levels': gap_levels,
-                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False)},
+                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False),
+                            **gap_continuation_hits},
             })
 
         if engulfing in ['bullish', 'bearish']:
