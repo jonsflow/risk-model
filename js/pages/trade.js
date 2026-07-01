@@ -744,7 +744,7 @@ function renderEodOutcomes(scored) {
   const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
 
   const eodSpyClose  = cacheData.symbols?.['SPY']?.close;
-  const eodPrevClose = scores.gap?.prior_close;
+  const eodPrevClose = scores.gap_range?.prior_close;
   const eodChangeDol = (eodSpyClose != null && eodPrevClose != null) ? +(eodSpyClose - eodPrevClose).toFixed(2) : null;
   const eodChangePct = (eodChangeDol != null && eodPrevClose) ? +(eodChangeDol / eodPrevClose * 100).toFixed(2) : null;
   const eodColor     = eodChangeDol == null || eodChangeDol === 0 ? '#6b7280' : eodChangeDol > 0 ? '#10b981' : '#ef4444';
@@ -803,30 +803,50 @@ function renderEodOutcomes(scored) {
       const dirColor = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#94a3b8';
 
       let outcomeLabel, outcomeColor;
-      if (oc.next_day) {
+      const hasOrbLevels = lv.orb_high != null;
+      const hasGapFields = lv.fill_target != null || lv.t2_continuation != null || 'filled' in oc;
+      if (oc.no_trade) {
+        outcomeLabel = `No trade — ${oc.reason || 'setup did not qualify'}`;
+        outcomeColor = '#6b7280';
+      } else if (oc.next_day) {
         outcomeLabel = 'Next session'; outcomeColor = '#f59e0b';
-      } else if (p.pattern === 'ORB') {
+      } else if (p.pattern.includes('ORB') && hasOrbLevels) {
         if (oc.hit_t1)        { outcomeLabel = '✓ T1 Hit'; outcomeColor = '#10b981'; }
         else if (oc.breached) { outcomeLabel = 'Breached';  outcomeColor = '#f59e0b'; }
         else                  { outcomeLabel = 'No breach'; outcomeColor = '#6b7280'; }
-      } else if (p.pattern === 'Gap') {
-        outcomeLabel = oc.filled ? '✓ Filled' : 'Open';
-        outcomeColor = oc.filled ? '#10b981' : '#f59e0b';
+      } else if (p.pattern.includes('Gap') && hasGapFields) {
+        const isContinuation = p.pattern.includes('Continuation');
+        if (isContinuation) {
+          if (oc.hit_t2_continuation)      { outcomeLabel = '✓ T2 Hit'; outcomeColor = '#10b981'; }
+          else if (oc.hit_t1_continuation) { outcomeLabel = '✓ T1 Hit'; outcomeColor = '#10b981'; }
+          else if (oc.filled)              { outcomeLabel = 'Filled (thesis broke)'; outcomeColor = '#ef4444'; }
+          else                             { outcomeLabel = 'Held, no target'; outcomeColor = '#f59e0b'; }
+        } else {
+          outcomeLabel = oc.filled ? '✓ Filled' : 'Not filled';
+          outcomeColor = oc.filled ? '#10b981' : '#f59e0b';
+        }
       } else {
         outcomeLabel = '—'; outcomeColor = '#6b7280';
       }
 
       let levelsInner = '';
-      if (p.pattern === 'ORB' && lv.orb_high != null) {
+      if (lv.orb_high != null) {
         levelsInner = `
           <div><strong>Range:</strong> $${lv.orb_low} – $${lv.orb_high}</div>
           <div><strong>T1↑:</strong> $${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓:</strong> $${lv.t1_down}</div>
           <div><strong>T2↑:</strong> $${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓:</strong> $${lv.t2_down}</div>`;
-      } else if (p.pattern === 'Gap') {
+        if (lv.fill_target != null) {
+          levelsInner += `<div><strong>Gap fill:</strong> $${lv.fill_target}</div>`;
+        }
+      } else if (lv.fill_target != null) {
         levelsInner = `
           <div><strong>Fill target:</strong> $${lv.fill_target}</div>
+          <div><strong>Cont. T1:</strong> $${lv.t1_continuation}${lv.t2_continuation != null ? ` &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2_continuation}` : ''}</div>`;
+      } else if (lv.t2_continuation != null) {
+        levelsInner = `
+          <div><strong>Open:</strong> $${lv.today_open}</div>
           <div><strong>Cont. T1:</strong> $${lv.t1_continuation} &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2_continuation}</div>`;
-      } else if (lv.entry != null) {
+      } else if (typeof lv.entry === 'number') {
         levelsInner = `
           <div><strong>Entry:</strong> $${lv.entry}</div>
           <div><strong>Stop:</strong> $${lv.stop}</div>
@@ -856,7 +876,7 @@ function renderEodOutcomes(scored) {
     html += sec('4 — Confluence Review', '<div class="muted">No trades met confluence threshold (3+).</div>');
   } else {
     const confCards = scored.map(trade => {
-      const sc      = trade.score >= 7 ? '#10b981' : trade.score >= 5 ? '#f59e0b' : '#3b82f6';
+      const sc      = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
       const szLabel = trade.score >= 6 ? 'Full Size' : trade.score >= 4 ? '75% Size' : '50% Size';
       const checksHTML = Object.entries(trade.checks).map(([k, v]) =>
         `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
@@ -897,25 +917,54 @@ function renderEodOutcomes(scored) {
       const dirArrow    = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
 
       let levelsInner = '';
-      if (p.pattern === 'ORB') {
+      const row = (label, value, tail) =>
+        `<div style="display:flex; justify-content:space-between;"><span>${label} ${value}</span>${tail}</div>`;
+
+      if (lv.orb_high != null) {
         const bColor  = oc.breached ? (oc.direction === 'up' ? '#10b981' : '#ef4444') : '#6b7280';
         const t1Color = oc.hit_t1 ? '#10b981' : oc.breached ? '#f59e0b' : '#6b7280';
-        levelsInner = `
-          <div style="display:flex; justify-content:space-between;"><span><strong>Range:</strong> $${lv.orb_low} – $${lv.orb_high}</span><span style="color:${bColor};">${oc.breached ? (oc.direction === 'up' ? '▲ Broke up' : '▼ Broke down') : 'No breach'}</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>T1↑</strong> $${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓</strong> $${lv.t1_down}</span><span style="color:${t1Color};">${oc.hit_t1 ? '✓ Hit' : '—'}</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>T2↑</strong> $${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓</strong> $${lv.t2_down}</span><span class="muted">—</span></div>`;
-      } else if (p.pattern === 'Gap') {
+        const breachTail = `<span style="color:${bColor};">${oc.breached ? (oc.direction === 'up' ? '▲ Broke up' : '▼ Broke down') : 'No breach'}</span>`;
+        const t1Tail     = `<span style="color:${t1Color};">${oc.hit_t1 ? '✓ Hit' : '—'}</span>`;
+        levelsInner =
+          row('<strong>Range:</strong>', `$${lv.orb_low} – $${lv.orb_high}`, breachTail) +
+          row('<strong>T1↑</strong>',    `$${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓</strong> $${lv.t1_down}`, t1Tail) +
+          row('<strong>T2↑</strong>',    `$${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓</strong> $${lv.t2_down}`, '<span class="muted">—</span>');
+        if (lv.fill_target != null) {
+          const fillColor = oc.filled ? '#10b981' : '#6b7280';
+          const fillTail  = `<span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span>`;
+          levelsInner += row('<strong>Gap fill:</strong>', `$${lv.fill_target}`, fillTail);
+        } else if (lv.t2_continuation != null) {
+          const t1cTail = oc.hit_t1_continuation ? '<span style="color:#10b981;">✓ Hit</span>' : '<span class="muted">—</span>';
+          const t2cTail = oc.hit_t2_continuation ? '<span style="color:#10b981;">✓ Hit</span>' : '<span class="muted">—</span>';
+          levelsInner += row('<strong>Cont. T1:</strong>', `$${lv.t1_continuation}`, t1cTail);
+          levelsInner += row('<strong>Cont. T2:</strong>', `$${lv.t2_continuation}`, t2cTail);
+        }
+      } else if (lv.fill_target != null) {
         const fillColor = oc.filled ? '#10b981' : '#6b7280';
-        levelsInner = `
-          <div style="display:flex; justify-content:space-between;"><span><strong>Fill target:</strong> $${lv.fill_target}</span><span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>Cont. T1:</strong> $${lv.t1_continuation}</span><span class="muted">—</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>Cont. T2:</strong> $${lv.t2_continuation}</span><span class="muted">—</span></div>`;
-      } else {
-        levelsInner = `
-          <div style="display:flex; justify-content:space-between;"><span><strong>Entry:</strong> $${lv.entry}</span><span style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>Stop:</strong> $${lv.stop}</span><span class="muted">—</span></div>
-          <div style="display:flex; justify-content:space-between;"><span><strong>T1 (1.5×):</strong> $${lv.t1}</span><span class="muted">—</span></div>
-          ${lv.t2 ? `<div style="display:flex; justify-content:space-between;"><span><strong>T2 (2×):</strong> $${lv.t2}</span><span class="muted">—</span></div>` : ''}`;
+        const fillTail  = `<span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span>`;
+        levelsInner =
+          row('<strong>Fill target:</strong>', `$${lv.fill_target}`, fillTail) +
+          row('<strong>Cont. T1:</strong>',    `$${lv.t1_continuation}`, '<span class="muted">—</span>');
+      } else if (lv.t2_continuation != null) {
+        const t1Tail = oc.hit_t1_continuation
+          ? '<span style="color:#10b981;">✓ Hit</span>'
+          : (oc.filled ? '<span style="color:#ef4444;">Missed</span>' : '<span class="muted">—</span>');
+        const t2Tail = oc.hit_t2_continuation
+          ? '<span style="color:#10b981;">✓ Hit</span>'
+          : (oc.filled ? '<span style="color:#ef4444;">Missed</span>' : '<span class="muted">—</span>');
+        const filledTail = oc.filled
+          ? '<span style="color:#ef4444;">Filled (thesis broke)</span>'
+          : '<span style="color:#10b981;">✓ Held</span>';
+        levelsInner =
+          row('<strong>Open:</strong>',     `$${lv.today_open}`, filledTail) +
+          row('<strong>Cont. T1:</strong>', `$${lv.t1_continuation}`, t1Tail) +
+          row('<strong>Cont. T2:</strong>', `$${lv.t2_continuation}`, t2Tail);
+      } else if (typeof lv.entry === 'number') {
+        levelsInner =
+          row('<strong>Entry:</strong>',       `$${lv.entry}`, `<span style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</span>`) +
+          row('<strong>Stop:</strong>',        `$${lv.stop}`,  '<span class="muted">—</span>') +
+          row('<strong>T1 (1.5×):</strong>',   `$${lv.t1}`,    '<span class="muted">—</span>') +
+          (lv.t2 ? row('<strong>T2 (2×):</strong>', `$${lv.t2}`, '<span class="muted">—</span>') : '');
       }
 
       return `
@@ -949,6 +998,55 @@ function renderEodOutcomes(scored) {
         </div>`;
     }).join('');
     html += sec('5 — Trade Levels & Outcomes', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${tradeCards}</div>`);
+  }
+
+  // Section 6: Prior Session Setups — resolves the previous bar's next-session
+  // patterns (Engulfing, Outside Day) against today's high/low.
+  const priorEntries = Object.entries(cacheData.symbols || {})
+    .flatMap(([sym, sd]) => (sd.prior_setups || []).map(r => ({ symbol: sym, ...r })))
+    .filter(r => r.symbol === selectedSymbol);
+
+  if (priorEntries.length === 0) {
+    html += sec('6 — Prior Session Setups', `<div class="muted">No next-day setup fired on ${selectedSymbol}'s prior bar.</div>`);
+  } else {
+    const priorCards = priorEntries.map(r => {
+      const dirArrow = r.direction === 'up' ? '▲' : '▼';
+      const dirColor = r.direction === 'up' ? '#10b981' : '#ef4444';
+
+      let label, color;
+      if (!r.triggered)     { label = 'Not triggered';   color = '#6b7280'; }
+      else if (r.hit_t2)    { label = '✓ T2 Hit';        color = '#10b981'; }
+      else if (r.hit_t1)    { label = '✓ T1 Hit';        color = '#10b981'; }
+      else if (r.stop_hit)  { label = '✗ Stopped';       color = '#ef4444'; }
+      else                  { label = 'Triggered, open'; color = '#f59e0b'; }
+
+      const row = (lbl, val, tail) =>
+        `<div style="display:flex; justify-content:space-between;"><span><strong>${lbl}:</strong> ${val}</span>${tail}</div>`;
+      const check = (cond, hit) => cond
+        ? `<span style="color:${hit ? '#10b981' : '#ef4444'};">${hit ? '✓ Hit' : '✗ Hit'}</span>`
+        : '<span class="muted">—</span>';
+
+      const rowsInner =
+        row('Entry', `$${r.entry}`, `<span style="color:${r.triggered ? '#10b981' : '#6b7280'};">${r.triggered ? '✓ Triggered' : 'Not reached'}</span>`) +
+        row('Stop',  `$${r.stop}`,  check(r.triggered, r.stop_hit)) +
+        row('T1',    `$${r.t1}`,    check(r.triggered, r.hit_t1)) +
+        (r.t2 != null ? row('T2', `$${r.t2}`, check(r.triggered, r.hit_t2)) : '');
+
+      return `
+        <div class="trade-card" style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <strong style="font-size: 1.1em;">${r.symbol}</strong>
+              <span style="margin-left: 8px; background: ${dirColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
+                ${r.pattern} ${dirArrow}
+              </span>
+            </div>
+            <span style="font-weight: bold; color: ${color}; font-size: 0.85em;">${label}</span>
+          </div>
+          <div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em;">${rowsInner}</div>
+        </div>`;
+    }).join('');
+    html += sec('6 — Prior Session Setups', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${priorCards}</div>`);
   }
 
   el.innerHTML = html;
