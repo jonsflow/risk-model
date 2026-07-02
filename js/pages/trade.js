@@ -840,8 +840,7 @@ function renderEodOutcomes(scored) {
         }
       } else if (lv.fill_target != null) {
         levelsInner = `
-          <div><strong>Fill target:</strong> $${lv.fill_target}</div>
-          <div><strong>Cont. T1:</strong> $${lv.t1_continuation}${lv.t2_continuation != null ? ` &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2_continuation}` : ''}</div>`;
+          <div><strong>Fill target:</strong> $${lv.fill_target}</div>`;
       } else if (lv.t2_continuation != null) {
         levelsInner = `
           <div><strong>Open:</strong> $${lv.today_open}</div>
@@ -942,9 +941,7 @@ function renderEodOutcomes(scored) {
       } else if (lv.fill_target != null) {
         const fillColor = oc.filled ? '#10b981' : '#6b7280';
         const fillTail  = `<span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span>`;
-        levelsInner =
-          row('<strong>Fill target:</strong>', `$${lv.fill_target}`, fillTail) +
-          row('<strong>Cont. T1:</strong>',    `$${lv.t1_continuation}`, '<span class="muted">—</span>');
+        levelsInner = row('<strong>Fill target:</strong>', `$${lv.fill_target}`, fillTail);
       } else if (lv.t2_continuation != null) {
         const t1Tail = oc.hit_t1_continuation
           ? '<span style="color:#10b981;">✓ Hit</span>'

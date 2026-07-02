@@ -609,15 +609,17 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
     print(f"Generating trading signals for {len(symbols)} symbols...")
     now_utc = datetime.now(timezone.utc)
 
-    daily_data:  dict = {s: db.load_daily_ohlcv(s)  for s in symbols}
-    hourly_data: dict = {s: db.load_hourly_ohlcv(s) for s in symbols}
+    daily_data:   dict = {s: db.load_daily_ohlcv(s)  for s in symbols}
+    hourly_data:  dict = {s: db.load_hourly_ohlcv(s) for s in symbols}
+    five_min_data: dict = {s: db.load_5m_ohlcv(s)   for s in symbols}
 
     if target_date:
         target_ts   = int(datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc).timestamp())
         next_day_ts = target_ts + 86400
         for s in symbols:
-            daily_data[s]  = [p for p in daily_data[s]  if p[0] <= target_ts]
-            hourly_data[s] = [p for p in hourly_data[s] if p[0] < next_day_ts]
+            daily_data[s]    = [p for p in daily_data[s]    if p[0] <= target_ts]
+            hourly_data[s]   = [p for p in hourly_data[s]   if p[0] < next_day_ts]
+            five_min_data[s] = [p for p in five_min_data[s] if p[0] < next_day_ts]
 
     spy_last = daily_data.get('SPY', [])
     data_day = datetime.fromtimestamp(spy_last[-1][0], tz=timezone.utc).date() if spy_last else now_utc.date()
@@ -637,15 +639,17 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         return datetime.fromtimestamp(bars[idx][0], tz=_MARKET_TZ).strftime('%H:%M')
 
     spy_hourly = hourly_data.get('SPY', [])
+    spy_5m     = five_min_data.get('SPY', [])
     spy_daily  = daily_data.get('SPY', [])
-    daily_latest  = datetime.fromtimestamp(spy_daily[-1][0],  tz=timezone.utc).date() if spy_daily  else None
-    hourly_latest = datetime.fromtimestamp(spy_hourly[-1][0], tz=_MARKET_TZ).date() if spy_hourly else None
-    spy_date = hourly_latest if (hourly_latest and daily_latest and hourly_latest > daily_latest) else daily_latest
+    daily_latest  = datetime.fromtimestamp(spy_daily[-1][0], tz=timezone.utc).date() if spy_daily else None
+    intra_latest  = datetime.fromtimestamp(spy_5m[-1][0],    tz=_MARKET_TZ).date() if spy_5m   else (
+                    datetime.fromtimestamp(spy_hourly[-1][0], tz=_MARKET_TZ).date() if spy_hourly else None)
+    spy_date = intra_latest if (intra_latest and daily_latest and intra_latest > daily_latest) else daily_latest
 
-    pm_bars   = _get_session_bars(spy_hourly, 800,  930,  target_date=spy_date)
-    orb_bars  = _get_session_bars(spy_hourly, 930,  1030, target_date=spy_date)
-    sess_bars = _get_session_bars(spy_hourly, 930,  1600, target_date=spy_date)
-    lh_bars   = _get_session_bars(spy_hourly, 1500, 1600, target_date=spy_date)
+    pm_bars   = _get_session_bars(spy_5m, 800,  930,  target_date=spy_date)
+    orb_bars  = _get_session_bars(spy_5m, 930,  1030, target_date=spy_date)
+    sess_bars = _get_session_bars(spy_5m, 930,  1600, target_date=spy_date)
+    lh_bars   = _get_session_bars(spy_5m, 1500, 1600, target_date=spy_date)
 
     output['windows'] = {
         'premarket':     {'from': bar_time(pm_bars,   0),  'to': bar_time(pm_bars,   -1)},
@@ -681,11 +685,12 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         vol_50d_avg = sum(vols[-50:]) / 50 if len(vols) >= 50 else 0
 
         hourly = hourly_data.get(symbol, [])
+        bars_5m = five_min_data.get(symbol, [])
         today_date = datetime.fromtimestamp(today_ts, tz=timezone.utc).date()
-        pm_bars_sym  = _get_session_bars(hourly, 800,  930,  target_date=today_date) if hourly else []
-        lh_bars_sym  = _get_session_bars(hourly, 1500, 1600, target_date=today_date) if hourly else []
+        pm_bars_sym  = _get_session_bars(bars_5m, 800,  930,  target_date=today_date) if bars_5m else []
+        lh_bars_sym  = _get_session_bars(bars_5m, 1500, 1600, target_date=today_date) if bars_5m else []
 
-        pm_sym = _compute_premarket_metrics(hourly, today_date) if hourly else None
+        pm_sym = _compute_premarket_metrics(bars_5m, today_date) if bars_5m else None
         pm_range_active = (pm_sym['range']['ratio'] >= 0.7) if (pm_sym and pm_sym.get('has_range')) else (atr_current > atr_20day_avg)
 
         hist_gaps = [abs(points[i][1]['open'] - points[i-1][1]['close'])
@@ -704,14 +709,14 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
 
         outside_day_dir = _detect_outside_day(points)
         outside_day     = outside_day_dir in ['up', 'down']
-        _orb_bars       = _get_session_bars(hourly, 930, 1030, target_date=today_date) if hourly else []
+        _orb_bars       = _get_session_bars(bars_5m, 930, 1030, target_date=today_date) if bars_5m else []
         opening_range   = (max(b[1]['high'] for b in _orb_bars) - min(b[1]['low'] for b in _orb_bars)) if _orb_bars else 0.0
         orb_qualified   = opening_range > 0.75 * atr_20day_avg if atr_20day_avg else False
         engulfing       = _detect_engulfing(points, vol_20d_avg)
         squeeze         = _calculate_squeeze(hourly) if hourly else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
-        vwap            = _calculate_vwap(hourly) if hourly else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
+        vwap            = _calculate_vwap(bars_5m) if bars_5m else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
         rsi_div         = _calculate_rsi_divergence(hourly) if hourly else {'signal': 'unknown', 'description': 'No hourly data'}
-        eod_outcome     = _calculate_eod_outcomes(points, hourly, gap, atr_current)
+        eod_outcome     = _calculate_eod_outcomes(points, bars_5m, gap, atr_current)
 
         # ADR: average daily range on prior complete bars only
         _prior = points[:-1]
@@ -726,7 +731,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             else:
                 regime_label = output['regime'].get('label', 'Ranging')
                 day_grade, scores = _grade_day_quality(
-                    points[:-1], hourly, spy_date, regime_label,
+                    points[:-1], bars_5m, spy_date, regime_label,
                     adr_8d=adr_8d, adr_20d=adr_20d,
                     alignment_score=_align_score, alignment_detail=_align_detail,
                 )
@@ -810,7 +815,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 gap_pattern_name, gap_direction = 'Gap Fill', ('down' if is_up_gap else 'up')
                 gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · {market_regime}"
                 gap_levels = {'prev_close': prev_close_val, 'today_open': today_open_val, 'fill_target': prev_close_val,
-                              't1_continuation': round(today_open_val + 1.5 * atr_current * mult, 2), 'atr': round(atr_current, 2)}
+                              'atr': round(atr_current, 2)}
 
         if orb_has_levels:
             orb_h = eod_outcome.get('orb_high') or 0.0

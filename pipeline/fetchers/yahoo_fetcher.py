@@ -70,15 +70,25 @@ def _load_symbols() -> tuple[list[str], dict[str, str]]:
     return symbols, ticker_map
 
 
+def _load_5m_symbols() -> set[str]:
+    """Symbols eligible for 5-minute fetch — the trading-9 from trading_config.json."""
+    trading_path = Path('config/trading_config.json')
+    if not trading_path.exists():
+        return set()
+    tcfg = json.loads(trading_path.read_text())
+    return {entry['symbol'].upper() for entry in tcfg.get('symbols', [])}
+
+
 class YahooFetcher(BaseFetcher):
     def fetch(self) -> None:
         symbols, ticker_map = _load_symbols()
-        print(f"Fetching {len(symbols)} symbols from Yahoo Finance...", file=sys.stderr)
+        five_min_syms = _load_5m_symbols()
+        print(f"Fetching {len(symbols)} symbols from Yahoo Finance ({len(five_min_syms)} also fetch 5m)...", file=sys.stderr)
 
         for symbol in symbols:
             try:
                 print(f"  {symbol}...", file=sys.stderr)
-                self._fetch_symbol(symbol, ticker_map)
+                self._fetch_symbol(symbol, ticker_map, five_min_syms)
             except Exception as e:
                 print(f"  ERROR fetching {symbol}: {e}", file=sys.stderr)
                 raise
@@ -89,11 +99,13 @@ class YahooFetcher(BaseFetcher):
         ts_file.write_text(datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'))
         print("Done.", file=sys.stderr)
 
-    def _fetch_symbol(self, symbol: str, ticker_map: dict) -> None:
+    def _fetch_symbol(self, symbol: str, ticker_map: dict, five_min_syms: set[str]) -> None:
         ticker_symbol = ticker_map.get(symbol, symbol)
         ticker = yf.Ticker(ticker_symbol)
         self._fetch_daily(symbol, ticker)
         self._fetch_hourly(symbol, ticker)
+        if symbol.upper() in five_min_syms:
+            self._fetch_5m(symbol, ticker)
 
     def _fetch_daily(self, symbol: str, ticker) -> None:
         last_ts = self.db.last_daily_timestamp(symbol.upper())
@@ -163,6 +175,40 @@ class YahooFetcher(BaseFetcher):
         if rows:
             self.db.upsert_hourly(rows)
             print(f"    hourly {symbol}: {len(rows)} bars stored", file=sys.stderr)
+
+    def _fetch_5m(self, symbol: str, ticker) -> None:
+        last_ts = self.db.last_5m_timestamp(symbol.upper())
+        if last_ts:
+            start_date = datetime.fromtimestamp(last_ts, tz=timezone.utc).strftime('%Y-%m-%d')
+            df = ticker.history(start=start_date, interval='5m', prepost=True)
+        else:
+            df = ticker.history(period='60d', interval='5m', prepost=True)
+
+        if df.empty:
+            print(f"    WARNING: no 5m data for {symbol}", file=sys.stderr)
+            return
+
+        df = df.reset_index()
+
+        rows = []
+        for _, row in df.iterrows():
+            try:
+                dt = row['Datetime']
+                ts = int(dt.timestamp())
+                rows.append((
+                    symbol.upper(), ts,
+                    float(row.get('Open', 0) or 0),
+                    float(row.get('High', 0) or 0),
+                    float(row.get('Low', 0) or 0),
+                    float(row['Close']),
+                    int(row.get('Volume', 0) or 0),
+                ))
+            except (ValueError, KeyError, TypeError):
+                continue
+
+        if rows:
+            self.db.upsert_5m(rows)
+            print(f"    5m     {symbol}: {len(rows)} bars stored", file=sys.stderr)
 
 
 if __name__ == '__main__':
