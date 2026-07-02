@@ -7,6 +7,7 @@ JSON cache files remain the browser-facing interface (unchanged from v1).
 Schema:
   prices_daily  (symbol, timestamp, open, high, low, close, volume)
   prices_hourly (symbol, timestamp, open, high, low, close, volume)
+  prices_5m     (symbol, timestamp, open, high, low, close, volume)
   fred_data     (series_id, date, value)
   run_log       (id, pipeline, started_at, finished_at, status, error)
 """
@@ -67,6 +68,19 @@ class DBManager:
                 );
                 CREATE INDEX IF NOT EXISTS idx_prices_hourly_symbol
                     ON prices_hourly (symbol, timestamp);
+
+                CREATE TABLE IF NOT EXISTS prices_5m (
+                    symbol    TEXT    NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    open      REAL,
+                    high      REAL,
+                    low       REAL,
+                    close     REAL,
+                    volume    INTEGER,
+                    PRIMARY KEY (symbol, timestamp)
+                );
+                CREATE INDEX IF NOT EXISTS idx_prices_5m_symbol
+                    ON prices_5m (symbol, timestamp);
 
                 CREATE TABLE IF NOT EXISTS fred_data (
                     series_id TEXT NOT NULL,
@@ -161,6 +175,21 @@ class DBManager:
             conn.executemany(sql, rows)
         return len(rows)
 
+    def upsert_5m(self, rows: list) -> int:
+        """
+        Insert or replace 5-minute bars.
+        rows: list of (symbol, timestamp, open, high, low, close, volume)
+        Returns count inserted.
+        """
+        sql = """
+            INSERT OR REPLACE INTO prices_5m
+                (symbol, timestamp, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        with self.connect() as conn:
+            conn.executemany(sql, rows)
+        return len(rows)
+
     # ------------------------------------------------------------------
     # Price read
     # ------------------------------------------------------------------
@@ -229,6 +258,30 @@ class DBManager:
     def last_hourly_timestamp(self, symbol: str) -> int | None:
         """Return latest hourly timestamp for symbol, or None."""
         sql = "SELECT MAX(timestamp) FROM prices_hourly WHERE symbol=?"
+        with self.connect() as conn:
+            row = conn.execute(sql, (symbol.upper(),)).fetchone()
+        return row[0] if row else None
+
+    def load_5m_ohlcv(self, symbol: str) -> list:
+        """
+        Return [(timestamp, {open,high,low,close,volume}), ...] for 5-minute bars.
+        """
+        sql = """
+            SELECT timestamp, open, high, low, close, volume FROM prices_5m
+            WHERE symbol = ?
+            ORDER BY timestamp
+        """
+        with self.connect() as conn:
+            rows = conn.execute(sql, (symbol.upper(),)).fetchall()
+        return [
+            (r[0], {'open': r[1] or 0.0, 'high': r[2] or 0.0,
+                    'low': r[3] or 0.0, 'close': r[4], 'volume': r[5] or 0})
+            for r in rows if r[4] is not None
+        ]
+
+    def last_5m_timestamp(self, symbol: str) -> int | None:
+        """Return latest 5-minute timestamp for symbol, or None."""
+        sql = "SELECT MAX(timestamp) FROM prices_5m WHERE symbol=?"
         with self.connect() as conn:
             row = conn.execute(sql, (symbol.upper(),)).fetchone()
         return row[0] if row else None
