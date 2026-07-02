@@ -5,9 +5,10 @@ The DB is the internal store for the v2 pipeline. The browser never touches it;
 JSON cache files remain the browser-facing interface (unchanged from v1).
 
 Schema:
-  prices    (symbol, timestamp, timeframe, open, high, low, close, volume)
-  fred_data (series_id, date, value)
-  run_log   (id, pipeline, started_at, finished_at, status, error)
+  prices_daily  (symbol, timestamp, open, high, low, close, volume)
+  prices_hourly (symbol, timestamp, open, high, low, close, volume)
+  fred_data     (series_id, date, value)
+  run_log       (id, pipeline, started_at, finished_at, status, error)
 """
 
 import csv
@@ -41,20 +42,31 @@ class DBManager:
     def create_schema(self) -> None:
         with self.connect() as conn:
             conn.executescript("""
-                CREATE TABLE IF NOT EXISTS prices (
+                CREATE TABLE IF NOT EXISTS prices_daily (
                     symbol    TEXT    NOT NULL,
                     timestamp INTEGER NOT NULL,
-                    timeframe TEXT    NOT NULL,
                     open      REAL,
                     high      REAL,
                     low       REAL,
                     close     REAL,
                     volume    INTEGER,
-                    PRIMARY KEY (symbol, timestamp, timeframe)
+                    PRIMARY KEY (symbol, timestamp)
                 );
+                CREATE INDEX IF NOT EXISTS idx_prices_daily_symbol
+                    ON prices_daily (symbol, timestamp);
 
-                CREATE INDEX IF NOT EXISTS idx_prices_symbol_tf
-                    ON prices (symbol, timeframe, timestamp);
+                CREATE TABLE IF NOT EXISTS prices_hourly (
+                    symbol    TEXT    NOT NULL,
+                    timestamp INTEGER NOT NULL,
+                    open      REAL,
+                    high      REAL,
+                    low       REAL,
+                    close     REAL,
+                    volume    INTEGER,
+                    PRIMARY KEY (symbol, timestamp)
+                );
+                CREATE INDEX IF NOT EXISTS idx_prices_hourly_symbol
+                    ON prices_hourly (symbol, timestamp);
 
                 CREATE TABLE IF NOT EXISTS fred_data (
                     series_id TEXT NOT NULL,
@@ -75,21 +87,75 @@ class DBManager:
                     error       TEXT
                 );
             """)
+            self._migrate_legacy_prices(conn)
+
+    def _migrate_legacy_prices(self, conn: sqlite3.Connection) -> None:
+        """One-shot migration: copy rows out of the legacy `prices` table into
+        prices_daily / prices_hourly, verify row counts match, then drop the
+        legacy table. Idempotent — no-op once the legacy table is gone.
+        """
+        row = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='prices'"
+        ).fetchone()
+        if row is None:
+            return
+
+        legacy_daily  = conn.execute("SELECT COUNT(*) FROM prices WHERE timeframe='daily'").fetchone()[0]
+        legacy_hourly = conn.execute("SELECT COUNT(*) FROM prices WHERE timeframe='hourly'").fetchone()[0]
+
+        conn.execute("""
+            INSERT OR IGNORE INTO prices_daily (symbol, timestamp, open, high, low, close, volume)
+            SELECT symbol, timestamp, open, high, low, close, volume
+            FROM prices WHERE timeframe = 'daily'
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO prices_hourly (symbol, timestamp, open, high, low, close, volume)
+            SELECT symbol, timestamp, open, high, low, close, volume
+            FROM prices WHERE timeframe = 'hourly'
+        """)
+
+        new_daily  = conn.execute("SELECT COUNT(*) FROM prices_daily").fetchone()[0]
+        new_hourly = conn.execute("SELECT COUNT(*) FROM prices_hourly").fetchone()[0]
+
+        if new_daily < legacy_daily or new_hourly < legacy_hourly:
+            raise RuntimeError(
+                f"Migration count mismatch — refusing to drop prices. "
+                f"legacy(daily={legacy_daily}, hourly={legacy_hourly}) "
+                f"vs new(daily={new_daily}, hourly={new_hourly})"
+            )
+
+        conn.execute("DROP TABLE prices")
+        print(f"Migrated legacy prices → prices_daily ({legacy_daily}), prices_hourly ({legacy_hourly}); dropped legacy table.")
 
     # ------------------------------------------------------------------
     # Price write
     # ------------------------------------------------------------------
 
-    def upsert_prices(self, rows: list) -> int:
+    def upsert_daily(self, rows: list) -> int:
         """
-        Insert or replace price rows.
-        rows: list of (symbol, timestamp, timeframe, open, high, low, close, volume)
+        Insert or replace daily bars.
+        rows: list of (symbol, timestamp, open, high, low, close, volume)
         Returns count inserted.
         """
         sql = """
-            INSERT OR REPLACE INTO prices
-                (symbol, timestamp, timeframe, open, high, low, close, volume)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO prices_daily
+                (symbol, timestamp, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        with self.connect() as conn:
+            conn.executemany(sql, rows)
+        return len(rows)
+
+    def upsert_hourly(self, rows: list) -> int:
+        """
+        Insert or replace hourly bars.
+        rows: list of (symbol, timestamp, open, high, low, close, volume)
+        Returns count inserted.
+        """
+        sql = """
+            INSERT OR REPLACE INTO prices_hourly
+                (symbol, timestamp, open, high, low, close, volume)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """
         with self.connect() as conn:
             conn.executemany(sql, rows)
@@ -102,8 +168,8 @@ class DBManager:
     def load_daily_close(self, symbol: str) -> list:
         """Return [(timestamp_secs, close), ...] for daily bars, sorted asc."""
         sql = """
-            SELECT timestamp, close FROM prices
-            WHERE symbol = ? AND timeframe = 'daily' AND close IS NOT NULL
+            SELECT timestamp, close FROM prices_daily
+            WHERE symbol = ? AND close IS NOT NULL
             ORDER BY timestamp
         """
         with self.connect() as conn:
@@ -112,8 +178,8 @@ class DBManager:
     def load_hourly_close(self, symbol: str) -> list:
         """Return [(timestamp_secs, close), ...] for hourly bars, sorted asc."""
         sql = """
-            SELECT timestamp, close FROM prices
-            WHERE symbol = ? AND timeframe = 'hourly' AND close IS NOT NULL
+            SELECT timestamp, close FROM prices_hourly
+            WHERE symbol = ? AND close IS NOT NULL
             ORDER BY timestamp
         """
         with self.connect() as conn:
@@ -124,8 +190,8 @@ class DBManager:
         Return [(timestamp, {open,high,low,close,volume}), ...] for daily bars.
         """
         sql = """
-            SELECT timestamp, open, high, low, close, volume FROM prices
-            WHERE symbol = ? AND timeframe = 'daily'
+            SELECT timestamp, open, high, low, close, volume FROM prices_daily
+            WHERE symbol = ?
             ORDER BY timestamp
         """
         with self.connect() as conn:
@@ -141,8 +207,8 @@ class DBManager:
         Return [(timestamp, {open,high,low,close,volume}), ...] for hourly bars.
         """
         sql = """
-            SELECT timestamp, open, high, low, close, volume FROM prices
-            WHERE symbol = ? AND timeframe = 'hourly'
+            SELECT timestamp, open, high, low, close, volume FROM prices_hourly
+            WHERE symbol = ?
             ORDER BY timestamp
         """
         with self.connect() as conn:
@@ -155,14 +221,14 @@ class DBManager:
 
     def last_daily_timestamp(self, symbol: str) -> int | None:
         """Return latest daily timestamp for symbol, or None."""
-        sql = "SELECT MAX(timestamp) FROM prices WHERE symbol=? AND timeframe='daily'"
+        sql = "SELECT MAX(timestamp) FROM prices_daily WHERE symbol=?"
         with self.connect() as conn:
             row = conn.execute(sql, (symbol.upper(),)).fetchone()
         return row[0] if row else None
 
     def last_hourly_timestamp(self, symbol: str) -> int | None:
         """Return latest hourly timestamp for symbol, or None."""
-        sql = "SELECT MAX(timestamp) FROM prices WHERE symbol=? AND timeframe='hourly'"
+        sql = "SELECT MAX(timestamp) FROM prices_hourly WHERE symbol=?"
         with self.connect() as conn:
             row = conn.execute(sql, (symbol.upper(),)).fetchone()
         return row[0] if row else None
@@ -244,7 +310,7 @@ class DBManager:
                             ts = int(datetime.strptime(date, '%Y-%m-%d')
                                      .replace(tzinfo=timezone.utc).timestamp())
                             rows.append((
-                                symbol, ts, 'daily',
+                                symbol, ts,
                                 _f(row.get('Open')),
                                 _f(row.get('High')),
                                 _f(row.get('Low')),
@@ -254,7 +320,7 @@ class DBManager:
                         except (ValueError, KeyError):
                             continue
                 if rows:
-                    self.upsert_prices(rows)
+                    self.upsert_daily(rows)
                     total_daily += len(rows)
                     if verbose:
                         print(f"  daily  {symbol}: {len(rows)} bars")
@@ -279,7 +345,7 @@ class DBManager:
                                                        '%Y-%m-%d %H:%M:%S')
                                      .replace(tzinfo=timezone.utc).timestamp())
                             rows.append((
-                                symbol, ts, 'hourly',
+                                symbol, ts,
                                 _f(row.get('Open')),
                                 _f(row.get('High')),
                                 _f(row.get('Low')),
@@ -289,7 +355,7 @@ class DBManager:
                         except (ValueError, KeyError):
                             continue
                 if rows:
-                    self.upsert_prices(rows)
+                    self.upsert_hourly(rows)
                     total_hourly += len(rows)
                     if verbose:
                         print(f"  hourly {symbol}: {len(rows)} bars")
