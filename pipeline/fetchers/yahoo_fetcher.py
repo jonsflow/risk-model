@@ -116,7 +116,7 @@ class YahooFetcher(BaseFetcher):
                 ts = int(datetime.strptime(row['Date'], '%Y-%m-%d')
                          .replace(tzinfo=timezone.utc).timestamp())
                 rows.append((
-                    symbol.upper(), ts, 'daily',
+                    symbol.upper(), ts,
                     float(row.get('Open', 0) or 0),
                     float(row.get('High', 0) or 0),
                     float(row.get('Low', 0) or 0),
@@ -127,7 +127,7 @@ class YahooFetcher(BaseFetcher):
                 continue
 
         if rows:
-            self.db.upsert_prices(rows)
+            self.db.upsert_daily(rows)
             print(f"    daily  {symbol}: {len(rows)} bars stored", file=sys.stderr)
 
     def _fetch_hourly(self, symbol: str, ticker) -> None:
@@ -150,7 +150,7 @@ class YahooFetcher(BaseFetcher):
                 dt = row['Datetime']
                 ts = int(dt.timestamp())
                 rows.append((
-                    symbol.upper(), ts, 'hourly',
+                    symbol.upper(), ts,
                     float(row.get('Open', 0) or 0),
                     float(row.get('High', 0) or 0),
                     float(row.get('Low', 0) or 0),
@@ -161,7 +161,7 @@ class YahooFetcher(BaseFetcher):
                 continue
 
         if rows:
-            self.db.upsert_prices(rows)
+            self.db.upsert_hourly(rows)
             print(f"    hourly {symbol}: {len(rows)} bars stored", file=sys.stderr)
 
 
