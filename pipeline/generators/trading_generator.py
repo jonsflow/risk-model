@@ -12,6 +12,9 @@ import math
 import statistics
 from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
+
+_MARKET_TZ = ZoneInfo("America/New_York")
 
 from pipeline.base_generator import BaseGenerator
 from pipeline.analysis import find_pivot_highs, find_pivot_lows
@@ -127,13 +130,18 @@ def _calculate_moving_average(points: list, period: int) -> list:
 
 
 def _get_session_bars(hourly_points, start_hhmm, end_hhmm, target_date=None):
+    """Filter bars by ET session window. `start_hhmm` and `end_hhmm` are
+    interpreted as America/New_York wall-clock times (e.g. 930 = 09:30 ET)
+    so RTH-anchored filters (ORB, VWAP session, last hour) hit the intended
+    bars regardless of DST. `target_date` is compared against the bar's ET
+    calendar date for the same reason."""
     if not hourly_points:
         return []
     if target_date is None:
-        target_date = datetime.fromtimestamp(hourly_points[-1][0], tz=timezone.utc).date()
+        target_date = datetime.fromtimestamp(hourly_points[-1][0], tz=_MARKET_TZ).date()
     result = []
     for ts, ohlcv in hourly_points:
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts, tz=_MARKET_TZ)
         if dt.date() != target_date:
             continue
         hhmm = dt.hour * 100 + dt.minute
@@ -300,7 +308,7 @@ def _compute_premarket_metrics(hourly_points, target_date):
         return no_data
     pm_by_date: dict = {}
     for ts, ohlcv in hourly_points:
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts, tz=_MARKET_TZ)
         hhmm = dt.hour * 100 + dt.minute
         if 800 <= hhmm < 930:
             pm_by_date.setdefault(dt.date(), []).append(ohlcv)
@@ -382,13 +390,13 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label,
     median_gap = statistics.median(hist_gaps) if hist_gaps else 0.0
     est_open = None
     for ts, ohlcv in hourly_points:
-        dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+        dt = datetime.fromtimestamp(ts, tz=_MARKET_TZ)
         if dt.date() == target_date and dt.hour * 100 + dt.minute == 930:
             est_open = ohlcv['open']
             break
     if est_open is None:
         for ts, ohlcv in hourly_points:
-            if datetime.fromtimestamp(ts, tz=timezone.utc).date() == target_date:
+            if datetime.fromtimestamp(ts, tz=_MARKET_TZ).date() == target_date:
                 est_open = ohlcv['open']
                 break
     gap_pts   = abs(est_open - prior_close) if est_open is not None else 0.0
@@ -626,12 +634,12 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
 
     def bar_time(bars, idx):
         if not bars: return None
-        return datetime.fromtimestamp(bars[idx][0], tz=timezone.utc).strftime('%H:%M')
+        return datetime.fromtimestamp(bars[idx][0], tz=_MARKET_TZ).strftime('%H:%M')
 
     spy_hourly = hourly_data.get('SPY', [])
     spy_daily  = daily_data.get('SPY', [])
     daily_latest  = datetime.fromtimestamp(spy_daily[-1][0],  tz=timezone.utc).date() if spy_daily  else None
-    hourly_latest = datetime.fromtimestamp(spy_hourly[-1][0], tz=timezone.utc).date() if spy_hourly else None
+    hourly_latest = datetime.fromtimestamp(spy_hourly[-1][0], tz=_MARKET_TZ).date() if spy_hourly else None
     spy_date = hourly_latest if (hourly_latest and daily_latest and hourly_latest > daily_latest) else daily_latest
 
     pm_bars   = _get_session_bars(spy_hourly, 800,  930,  target_date=spy_date)
