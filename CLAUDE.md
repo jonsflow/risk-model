@@ -125,7 +125,6 @@ each file's own heading.
 - `cross-asset-divergence.md` — Application Guide
 - `pair-candidates.md` — Divergence Pair Candidates
 - `fred-data.md` — FRED Data
-- `trading-vix-bug.md` — Trading Generator: VIX Is Always Null
 - `portfolio-tracking.md` — Portfolio Allocation & Paper Trade Tracking
 - `gov-risk-score-research.md` — Research & Implementation Plan
 - `fomc-june-2026-research.md` — FOMC Meeting, June 17 2026

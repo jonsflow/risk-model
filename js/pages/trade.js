@@ -458,6 +458,9 @@ function renderDayQuality() {
       <span class="muted">VIX:</span>
       <strong style="color:${vixColor};">${vix.current}</strong>
       <span class="muted" style="font-size:0.8em;">${vix.ratio}× 20d avg (${vix.avg_20d}) — ${vixLabel}</span>
+      ${vix.as_of && vix.as_of !== cacheData.session_date
+        ? `<span class="muted" style="font-size:0.75em;">close of ${vix.as_of}</span>`
+        : ''}
     </div>`;
   }
 

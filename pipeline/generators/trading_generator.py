@@ -442,26 +442,32 @@ def _compute_premarket_metrics(hourly_points, target_date):
     }
 
 
-def _load_vix() -> dict:
-    path = DATA_DIR / 'fred' / 'VIXCLS.csv'
-    if not path.exists():
+def _load_vix(vix_daily, session_date, session_complete) -> dict:
+    """VIX level and its 20-day average, from the Yahoo daily bars in SQLite.
+
+    VIX comes down the Yahoo path with every other price on this page — it is
+    already in the fetch list via config/macro_config.json — rather than out of
+    FRED. This previously read data/fred/VIXCLS.csv, deleted along with the other
+    per-series CSVs, and so returned None on every run; the VIX row silently
+    vanished from Step 1.
+
+    Phase contract applies: before the close, only bars from prior sessions.
+    """
+    bars = _completed_bars(vix_daily) if session_complete else _prior_bars(vix_daily, session_date)
+    # Never read past the session being reported. VIX is fetched independently of
+    # the trading symbols, so it can be a session ahead of them — a backfill run
+    # for an old date especially.
+    if session_date:
+        bars = [b for b in bars if _bar_date(b) <= session_date]
+    closes = [b[1]['close'] for b in bars if b[1].get('close') is not None]
+    if not closes:
         return None
-    import csv as _csv
-    vals = []
-    with open(path, newline='') as f:
-        for row in _csv.DictReader(f):
-            try:
-                v = row.get('Value', '').strip()
-                if v and v != '.':
-                    vals.append(float(v))
-            except ValueError:
-                continue
-    if not vals:
-        return None
-    current = vals[-1]
-    avg_20d = sum(vals[-20:]) / min(20, len(vals))
+
+    current = closes[-1]
+    avg_20d = sum(closes[-20:]) / min(20, len(closes))
     return {'current': round(current, 2), 'avg_20d': round(avg_20d, 2),
-            'ratio': round(current / avg_20d, 2) if avg_20d else None}
+            'ratio': round(current / avg_20d, 2) if avg_20d else None,
+            'as_of': _bar_date(bars[-1]).isoformat()}
 
 
 def _compute_alignment_score(regime_symbols, hourly_data, target_date) -> tuple:
@@ -919,7 +925,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                                       session_complete=session_complete,
                                       expansion=expansion,
                                       regime_config=regime_config)
-    output['vix']    = _load_vix()
+    output['vix']    = _load_vix(db.load_daily_ohlcv('VIX'), spy_date, session_complete)
 
     _align_score, _align_detail = _compute_alignment_score(regime_symbols, hourly_data, spy_date)
 
