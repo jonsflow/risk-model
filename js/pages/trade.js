@@ -673,7 +673,7 @@ function renderPatternScanner(view) {
     if (data.above_ma_20 === false)             reasons.push('Below 20-MA');
 
     document.getElementById('step3Content').innerHTML = `
-      ${lowProbabilityHTML()}
+      ${lowProbabilityHTML(view)}
       <div style="color: #6b7280; padding: 12px;">
         No ${selectedSymbol} patterns detected.
         ${reasons.length ? `<span class="muted" style="font-size:0.85em;"> · ${reasons.join(' · ')}</span>` : ''}
@@ -681,7 +681,7 @@ function renderPatternScanner(view) {
     return;
   }
 
-  let html = `${lowProbabilityHTML()}
+  let html = `${lowProbabilityHTML(view)}
     <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="border-bottom: 2px solid #a7a7ad;">
@@ -1413,13 +1413,10 @@ async function init() {
     });
     selector.addEventListener('change', () => {
       selectedSymbol = selector.value;
-      if (!cacheData.market_closed && !['C', 'F'].includes(cacheData.day_quality.grade)) {
-        renderPatternScanner();
-        const scored = scoreConfluences();
-        scoredTrades = scored;
-        renderRecommendations(scored);
-        renderEodOutcomes(scored);
-      }
+      // renderAll rebuilds the morning view and passes it to every renderer.
+      // Calling the renderers directly here left them on their pre-view-model
+      // signatures, and re-applied a C/F veto the page no longer honours.
+      renderAll();
     });
 
     const picker = document.getElementById('tradeDatePicker');
