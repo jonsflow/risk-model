@@ -1,5 +1,5 @@
 {
-  "generated": "2026-08-17T20:49:16.142204+00:00",
+  "generated": "2026-09-16T03:28:42.382426+00:00",
   "market_closed": false,
   "day_quality": {
     "grade": "B",
@@ -12,6 +12,8 @@
         "has_pm_range": false,
         "gap_pts": 0.16,
         "gap_ratio": 0.07,
+        "gap_signed": -0.16,
+        "gap_pct": -0.02,
         "median_gap": 2.43,
         "prior_close": 776.34,
         "est_open": 776.18,
@@ -39,7 +41,8 @@
         }
       },
       "has_data": true
-    }
+    },
+    "posture_factor": 0.5
   },
   "day_realized": {
     "grade": "C",
@@ -69,7 +72,7 @@
     "direction": "up",
     "atr_trend": "normal",
     "index_alignment": "diverging",
-    "day_type": "normal",
+    "day_type": "inside",
     "expansion": {
       "expanding": false,
       "basis": "realized_range",
@@ -92,11 +95,29 @@
       "high": 776.78,
       "low": 772.51,
       "close": 772.67,
-      "volume": 30034004,
+      "volume": 34356600,
       "volume_above_20d": false,
       "atr_14": 7.85,
       "atr_20d_avg": 8.22,
       "atr_above_avg": false,
+      "preopen": {
+        "prior_close": 776.34,
+        "rsi_14": 65.7,
+        "macd_histogram": -7.3206,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": false,
+        "squeeze": {
+          "status": "strong",
+          "momentum": -3.0217,
+          "momentum_increasing": false
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 8.03
+      },
       "rsi_14": 61.8,
       "macd_line": -16.064,
       "macd_signal": -8.982,
@@ -118,9 +139,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": -5.1564,
-        "momentum_increasing": false
+        "status": "none",
+        "momentum": -4.4877,
+        "momentum_increasing": true
       },
       "vwap": {
         "vwap": 774.1,
@@ -134,7 +155,7 @@
       "eod_outcome": {
         "orb_high": 776.78,
         "orb_low": 775.0,
-        "orb_breached_up": false,
+        "orb_breached_up": true,
         "orb_breached_down": true,
         "orb_breached": true,
         "orb_direction": "down",
@@ -166,11 +187,29 @@
       "high": 734.58,
       "low": 729.27,
       "close": 729.87,
-      "volume": 25881583,
+      "volume": 26452600,
       "volume_above_20d": false,
       "atr_14": 12.39,
       "atr_20d_avg": 14.1,
       "atr_above_avg": false,
+      "preopen": {
+        "prior_close": 731.07,
+        "rsi_14": 59.6,
+        "macd_histogram": -12.6974,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": false,
+        "squeeze": {
+          "status": "normal",
+          "momentum": -9.7434,
+          "momentum_increasing": false
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 13.03
+      },
       "rsi_14": 58.9,
       "macd_line": -16.5268,
       "macd_signal": -2.2415,
@@ -192,9 +231,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "normal",
-        "momentum": -2.8218,
-        "momentum_increasing": false
+        "status": "weak",
+        "momentum": -1.7536,
+        "momentum_increasing": true
       },
       "vwap": {
         "vwap": 731.76,
@@ -236,20 +275,38 @@
     },
     "IWM": {
       "date": "2026-08-17",
-      "open": 303.96,
-      "high": 304.33,
-      "low": 303.23,
-      "close": 304.06,
-      "volume": 14168427,
+      "open": 303.17,
+      "high": 303.54,
+      "low": 302.44,
+      "close": 303.27,
+      "volume": 14546800,
       "volume_above_20d": false,
-      "atr_14": 3.68,
-      "atr_20d_avg": 4.03,
+      "atr_14": 3.67,
+      "atr_20d_avg": 4.01,
       "atr_above_avg": true,
+      "preopen": {
+        "prior_close": 304.3,
+        "rsi_14": 63.4,
+        "macd_histogram": -2.5913,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": true,
+        "squeeze": {
+          "status": "weak",
+          "momentum": 0.777,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 3.78
+      },
       "rsi_14": 61.2,
-      "macd_line": -4.2491,
-      "macd_signal": -1.7223,
-      "macd_histogram": -2.5269,
-      "ma_20": 297.3,
+      "macd_line": -4.2519,
+      "macd_signal": -1.7348,
+      "macd_histogram": -2.5171,
+      "ma_20": 296.53,
       "above_ma_20": true,
       "gap_pct": -0.37,
       "gap_type": "down",
@@ -267,7 +324,7 @@
       "engulfing": "none",
       "squeeze": {
         "status": "normal",
-        "momentum": -0.2616,
+        "momentum": -0.1711,
         "momentum_increasing": true
       },
       "vwap": {
@@ -282,10 +339,10 @@
       "eod_outcome": {
         "orb_high": 304.27,
         "orb_low": 303.23,
-        "orb_breached_up": true,
-        "orb_breached_down": false,
+        "orb_breached_up": false,
+        "orb_breached_down": true,
         "orb_breached": true,
-        "orb_direction": "up",
+        "orb_direction": "down",
         "orb_hit_t1": false,
         "gap_filled": false,
         "day_range": 1.1,
@@ -293,9 +350,9 @@
         "day_atr_multiple": 0.3
       },
       "prior_setups": [],
-      "adr_20d": 3.49,
-      "adr_8d": 2.48,
-      "prev_range": 2.44,
+      "adr_20d": 3.48,
+      "adr_8d": 2.47,
+      "prev_range": 2.43,
       "day_type": "inside",
       "premarket": {
         "high": 304.63,
@@ -314,11 +371,29 @@
       "high": 600.37,
       "low": 591.5,
       "close": 594.07,
-      "volume": 7582654,
+      "volume": 7700500,
       "volume_above_20d": false,
       "atr_14": 20.17,
       "atr_20d_avg": 24.96,
       "atr_above_avg": false,
+      "preopen": {
+        "prior_close": 587.82,
+        "rsi_14": 54.1,
+        "macd_histogram": -12.8093,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": false,
+        "squeeze": {
+          "status": "strong",
+          "momentum": -1.1064,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 21.44
+      },
       "rsi_14": 55.8,
       "macd_line": -6.6808,
       "macd_signal": 10.5025,
@@ -340,9 +415,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": 0.7238,
-        "momentum_increasing": false
+        "status": "strong",
+        "momentum": 7.5124,
+        "momentum_increasing": true
       },
       "vwap": {
         "vwap": 596.42,
@@ -384,26 +459,44 @@
     },
     "BTC": {
       "date": "2026-08-17",
-      "open": 62829.64,
-      "high": 64492.94,
-      "low": 62723.61,
-      "close": 64325.01,
-      "volume": 21726965760,
+      "open": 62819.38,
+      "high": 64547.85,
+      "low": 62687.1,
+      "close": 64506.25,
+      "volume": 21555405073,
       "volume_above_20d": true,
-      "atr_14": 1019.48,
-      "atr_20d_avg": 1334.89,
+      "atr_14": 1026.01,
+      "atr_20d_avg": 1335.22,
       "atr_above_avg": true,
-      "rsi_14": 53.4,
-      "macd_line": -15.3786,
-      "macd_signal": 180.4545,
-      "macd_histogram": -195.8331,
-      "ma_20": 63805.47,
+      "preopen": {
+        "prior_close": 62818.65,
+        "rsi_14": 41.8,
+        "macd_histogram": -139.9475,
+        "above_ma_20": false,
+        "volume_above_20d": false,
+        "pm_range_active": true,
+        "squeeze": {
+          "status": "strong",
+          "momentum": 321.76,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 1021.23
+      },
+      "rsi_14": 54.5,
+      "macd_line": -28.8039,
+      "macd_signal": 177.7694,
+      "macd_histogram": -206.5734,
+      "ma_20": 63814.53,
       "above_ma_20": true,
-      "gap_pct": 0.02,
+      "gap_pct": 0.0,
       "gap_type": "none",
       "gap_significant": true,
-      "gap_strong": true,
-      "median_overnight_gap": 1.17,
+      "gap_strong": false,
+      "median_overnight_gap": 0.99,
       "outside_day": false,
       "outside_day_direction": "none",
       "patterns": {
@@ -415,30 +508,30 @@
       "engulfing": "none",
       "squeeze": {
         "status": "none",
-        "momentum": 593.8975,
+        "momentum": 569.9452,
         "momentum_increasing": false
       },
       "vwap": {
-        "vwap": 64112.76,
+        "vwap": 64106.42,
         "above_vwap": true,
-        "distance_pct": 0.24
+        "distance_pct": 0.25
       },
       "rsi_divergence": {
         "signal": "none",
         "description": "No divergence"
       },
       "eod_outcome": {
-        "orb_high": 63729.86,
-        "orb_low": 63390.38,
+        "orb_high": 63720.82,
+        "orb_low": 63391.41,
         "orb_breached_up": true,
         "orb_breached_down": true,
         "orb_breached": true,
         "orb_direction": "up",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 1769.33,
-        "day_range_pct": 2.82,
-        "day_atr_multiple": 1.74
+        "day_range": 1860.75,
+        "day_range_pct": 2.97,
+        "day_atr_multiple": 1.81
       },
       "prior_setups": [],
       "adr_20d": 1166.23,
@@ -446,37 +539,55 @@
       "prev_range": 662.2,
       "day_type": "normal",
       "premarket": {
-        "high": 63612.27,
+        "high": 63613.55,
         "low": 63357.29,
-        "close": 63412.31
+        "close": 63418.21
       },
       "last_hour": {
         "high": 64374.26,
-        "low": 64231.02,
+        "low": 64231.01,
         "close": 64266.44
       }
     },
     "ETH": {
       "date": "2026-08-17",
-      "open": 1874.1,
-      "high": 1913.16,
-      "low": 1871.46,
-      "close": 1907.3,
-      "volume": 7972890624,
+      "open": 1873.97,
+      "high": 1916.66,
+      "low": 1870.75,
+      "close": 1912.2,
+      "volume": 7808026613,
       "volume_above_20d": true,
-      "atr_14": 35.96,
-      "atr_20d_avg": 52.32,
+      "atr_14": 36.26,
+      "atr_20d_avg": 52.34,
       "atr_above_avg": true,
-      "rsi_14": 55.9,
-      "macd_line": 0.1636,
-      "macd_signal": 4.7484,
-      "macd_histogram": -4.5848,
-      "ma_20": 1887.12,
+      "preopen": {
+        "prior_close": 1873.94,
+        "rsi_14": 49.7,
+        "macd_histogram": 0.3097,
+        "above_ma_20": false,
+        "volume_above_20d": false,
+        "pm_range_active": true,
+        "squeeze": {
+          "status": "normal",
+          "momentum": 14.184,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 36.97
+      },
+      "rsi_14": 56.7,
+      "macd_line": -0.1996,
+      "macd_signal": 4.6757,
+      "macd_histogram": -4.8753,
+      "ma_20": 1887.37,
       "above_ma_20": true,
-      "gap_pct": 0.01,
+      "gap_pct": 0.0,
       "gap_type": "none",
       "gap_significant": true,
-      "gap_strong": true,
+      "gap_strong": false,
       "median_overnight_gap": 0.04,
       "outside_day": false,
       "outside_day_direction": "none",
@@ -489,11 +600,11 @@
       "engulfing": "none",
       "squeeze": {
         "status": "strong",
-        "momentum": 9.3979,
-        "momentum_increasing": false
+        "momentum": 9.2152,
+        "momentum_increasing": true
       },
       "vwap": {
-        "vwap": 1906.21,
+        "vwap": 1906.19,
         "above_vwap": false,
         "distance_pct": -0.03
       },
@@ -510,9 +621,9 @@
         "orb_direction": "up",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 41.7,
-        "day_range_pct": 2.23,
-        "day_atr_multiple": 1.16
+        "day_range": 45.91,
+        "day_range_pct": 2.45,
+        "day_atr_multiple": 1.27
       },
       "prior_setups": [],
       "adr_20d": 43.9,
@@ -532,15 +643,33 @@
     },
     "GLD": {
       "date": "2026-08-17",
-      "open": 402.33,
+      "open": 402.34,
       "high": 406.23,
       "low": 402.18,
       "close": 405.49,
-      "volume": 9271660,
+      "volume": 9604100,
       "volume_above_20d": true,
       "atr_14": 7.24,
       "atr_20d_avg": 6.9,
       "atr_above_avg": false,
+      "preopen": {
+        "prior_close": 401.48,
+        "rsi_14": 63.2,
+        "macd_histogram": -4.7793,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": false,
+        "squeeze": {
+          "status": "strong",
+          "momentum": 2.5706,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 7.38
+      },
       "rsi_14": 65.6,
       "macd_line": -15.2134,
       "macd_signal": -9.7916,
@@ -562,9 +691,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": 4.5468,
-        "momentum_increasing": true
+        "status": "strong",
+        "momentum": 1.5,
+        "momentum_increasing": false
       },
       "vwap": {
         "vwap": 404.86,
@@ -608,13 +737,31 @@
       "date": "2026-08-17",
       "open": 59.0,
       "high": 60.15,
-      "low": 58.96,
+      "low": 58.95,
       "close": 59.57,
-      "volume": 12063373,
+      "volume": 12275100,
       "volume_above_20d": false,
       "atr_14": 1.75,
       "atr_20d_avg": 1.79,
       "atr_above_avg": true,
+      "preopen": {
+        "prior_close": 58.48,
+        "rsi_14": 59.7,
+        "macd_histogram": -1.1532,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": true,
+        "squeeze": {
+          "status": "strong",
+          "momentum": -0.1401,
+          "momentum_increasing": false
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 1.75
+      },
       "rsi_14": 62.7,
       "macd_line": -3.4604,
       "macd_signal": -2.1808,
@@ -636,9 +783,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": 0.0551,
-        "momentum_increasing": false
+        "status": "normal",
+        "momentum": 0.1824,
+        "momentum_increasing": true
       },
       "vwap": {
         "vwap": 59.6,
@@ -658,9 +805,9 @@
         "orb_direction": "up",
         "orb_hit_t1": false,
         "gap_filled": false,
-        "day_range": 1.19,
-        "day_range_pct": 2.02,
-        "day_atr_multiple": 0.68
+        "day_range": 1.2,
+        "day_range_pct": 2.04,
+        "day_atr_multiple": 0.69
       },
       "prior_setups": [],
       "adr_20d": 1.1,
@@ -684,11 +831,29 @@
       "high": 130.57,
       "low": 126.37,
       "close": 130.29,
-      "volume": 5103612,
+      "volume": 5279800,
       "volume_above_20d": false,
       "atr_14": 4.78,
       "atr_20d_avg": 5.58,
       "atr_above_avg": true,
+      "preopen": {
+        "prior_close": 126.6,
+        "rsi_14": 53.8,
+        "macd_histogram": 4.3607,
+        "above_ma_20": true,
+        "volume_above_20d": false,
+        "pm_range_active": true,
+        "squeeze": {
+          "status": "weak",
+          "momentum": 0.9626,
+          "momentum_increasing": true
+        },
+        "rsi_divergence": {
+          "signal": "none",
+          "description": "No divergence"
+        },
+        "atr_14": 4.93
+      },
       "rsi_14": 57.3,
       "macd_line": 1.1712,
       "macd_signal": -1.2542,
@@ -710,9 +875,9 @@
       },
       "engulfing": "none",
       "squeeze": {
-        "status": "weak",
-        "momentum": 2.5249,
-        "momentum_increasing": true
+        "status": "none",
+        "momentum": 2.1816,
+        "momentum_increasing": false
       },
       "vwap": {
         "vwap": 128.91,
@@ -760,10 +925,10 @@
       "direction": "up",
       "notes": "Entry: ORB breakout \u00b7 Gap -0.37% \u00b7 1.13 pts \u00b7 1.0\u00d7 median \u00b7 Trending",
       "levels": {
-        "prev_close": 305.09,
-        "today_open": 303.96,
-        "fill_target": 305.09,
-        "atr": 3.68,
+        "prev_close": 304.3,
+        "today_open": 303.17,
+        "fill_target": 304.3,
+        "atr": 3.67,
         "entry": "ORB breakout at open"
       },
       "outcome": {
@@ -774,7 +939,40 @@
         "orb",
         "gap_fill"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 4,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": true,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": false,
+          "MA(20) aligned (daily)": true,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": true
+        }
+      },
+      "qualifies": true,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.75,
+        "effective_pct": 37.5,
+        "tier_label": "75% Size"
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 3.78,
+        "t1_distance": 5.67,
+        "t2_distance": 7.56,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     },
     {
       "symbol": "SMH",
@@ -794,7 +992,40 @@
       "keys": [
         "gap_fill"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 2,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": false,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": true,
+          "MA(20) aligned (daily)": false,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": false
+        }
+      },
+      "qualifies": false,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.0,
+        "effective_pct": 0.0,
+        "tier_label": null
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 21.44,
+        "t1_distance": 32.16,
+        "t2_distance": 42.88,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     },
     {
       "symbol": "BTC",
@@ -809,7 +1040,40 @@
       "keys": [
         "orb"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 4,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": true,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": true,
+          "MA(20) aligned (daily)": true,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": false
+        }
+      },
+      "qualifies": true,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.75,
+        "effective_pct": 37.5,
+        "tier_label": "75% Size"
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 1021.23,
+        "t1_distance": 1531.85,
+        "t2_distance": 2042.46,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     },
     {
       "symbol": "ETH",
@@ -824,7 +1088,40 @@
       "keys": [
         "orb"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 3,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": true,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": false,
+          "MA(20) aligned (daily)": true,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": false
+        }
+      },
+      "qualifies": true,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.5,
+        "effective_pct": 25.0,
+        "tier_label": "50% Size"
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 36.97,
+        "t1_distance": 55.45,
+        "t2_distance": 73.94,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     },
     {
       "symbol": "SLV",
@@ -846,7 +1143,40 @@
         "orb",
         "gap_fill"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 4,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": true,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": true,
+          "MA(20) aligned (daily)": false,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": true
+        }
+      },
+      "qualifies": true,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.75,
+        "effective_pct": 37.5,
+        "tier_label": "75% Size"
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 1.75,
+        "t1_distance": 2.62,
+        "t2_distance": 3.5,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     },
     {
       "symbol": "USO",
@@ -861,7 +1191,40 @@
       "keys": [
         "orb"
       ],
-      "regime_match": true
+      "regime_match": true,
+      "confluence": {
+        "score": 2,
+        "max": 8,
+        "checks": {
+          "Volume > 20d avg (daily)": false,
+          "PM range active": true,
+          "RSI extreme (daily)": false,
+          "MACD aligned (daily)": false,
+          "MA(20) aligned (daily)": false,
+          "Day A or A+": false,
+          "Regime matches": true,
+          "Squeeze aligned (hourly)": false
+        }
+      },
+      "qualifies": false,
+      "sizing": {
+        "day_factor": 0.5,
+        "confluence_factor": 0.0,
+        "effective_pct": 0.0,
+        "tier_label": null
+      },
+      "plan": {
+        "stop_atr": 1.0,
+        "t1_atr": 1.5,
+        "t2_atr": 2.0,
+        "stop_distance": 4.93,
+        "t1_distance": 7.39,
+        "t2_distance": 9.86,
+        "entry": null,
+        "stop": null,
+        "t1": null,
+        "t2": null
+      }
     }
   ],
   "windows": {
@@ -885,7 +1248,12 @@
   "session_date": "2026-08-17",
   "phase": "eod",
   "session_complete": true,
-  "vix": null,
+  "vix": {
+    "current": 15.19,
+    "avg_20d": 16.46,
+    "ratio": 0.92,
+    "as_of": "2026-08-17"
+  },
   "vol_regime": {
     "label": "Normal",
     "atr_percentile_1y": 53.6
