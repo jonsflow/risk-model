@@ -45,8 +45,8 @@ const PATTERN_LABELS = {
 // their own quality and left the page blank below Step 1. The grade already
 // costs a confluence point ("Day A or A+" in scoreConfluences); that is the
 // price. Setups are shown, flagged low probability.
-function lowProbabilityHTML() {
-  const grade = cacheData.day_quality?.grade;
+function lowProbabilityHTML(view) {
+  const grade = view.day_quality?.grade;
   if (!['C', 'F'].includes(grade)) return '';
   return `
     <div style="background: #2a1414; border-left: 4px solid #ef4444; padding: 10px 12px; border-radius: 4px; margin-bottom: 12px;">
@@ -83,26 +83,27 @@ function isMarketOpenForDate(dateStr) {
 // sets a posture for the whole session, and each trade's confluence score scales
 // within it. Regime is not one of them — Step 2 gates which patterns are valid,
 // never the size. Both live here so Step 1 and Step 4 cannot drift apart.
-const DAY_POSTURE = {
-  'A+': { label: 'Full',     factor: 1,   note: 'ideal day — full size' },
-  'A':  { label: 'Full',     factor: 1,   note: 'good day — full size' },
-  'B':  { label: 'Half',     factor: 0.5, note: 'mixed day — reduce size 50%' },
-  'C':  { label: 'No trades', factor: 0,  note: 'sit out' },
-  'F':  { label: 'No trades', factor: 0,  note: 'stay in cash' },
-};
+// Sizing is decided by the generator from config/trading_config.json — the
+// tables that used to live here are gone, along with the ATR multiples and the
+// confluence cutoff. What remains is the wording for a factor the generator
+// hands us, so the backtester and the page cannot disagree about size.
+const POSTURE_WORDS = [
+  { min: 1,    label: 'Full',      note: 'full size' },
+  { min: 0.5,  label: 'Half',      note: 'reduce size 50%' },
+  { min: 0,    label: 'No trades', note: 'sit out' },
+];
 
-function dayPosture(grade) {
-  return DAY_POSTURE[grade] || { label: '—', factor: 1, note: '' };
+function dayPosture(view) {
+  const f = view.day_quality?.posture_factor;
+  if (f == null) return { label: '—', factor: 1, note: '' };
+  const w = POSTURE_WORDS.find(x => f >= x.min) || POSTURE_WORDS[POSTURE_WORDS.length - 1];
+  return { label: w.label, factor: f, note: w.note };
 }
 
-/** Confluence scaling for one trade, out of 8. */
-function confluenceFactor(score) {
-  return score >= 6 ? 1 : score >= 4 ? 0.75 : 0.5;
-}
-
-/** Day posture × confluence, as a percentage string. */
-function effectiveSize(grade, score) {
-  const pct = dayPosture(grade).factor * confluenceFactor(score) * 100;
+/** Effective size for one setup, as the generator computed it. */
+function effectiveSize(pattern) {
+  const pct = pattern?.sizing?.effective_pct;
+  if (pct == null) return '—';
   return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
 }
 
@@ -288,6 +289,47 @@ async function loadLogicTab() {
 // STEP 0: HEADER
 // =============================================================================
 
+// =============================================================================
+// VIEW MODELS
+// =============================================================================
+// The morning/EOD boundary used to exist only as a comment, and the comment was
+// wrong: it claimed the per-symbol indicators were written from bars prior to
+// session_date, when they come from the session's own bar. Every renderer read
+// one shared global, so nothing stopped a morning panel from displaying the
+// close — and several did.
+//
+// These two builders make the boundary structural. Morning renderers are handed
+// `buildMorningView()` and cannot reach a session field, because the object they
+// receive does not contain one. Adding a leak now requires adding a field here.
+
+function buildMorningView(c) {
+  const symbols = {};
+  for (const [sym, d] of Object.entries(c.symbols || {})) {
+    // `preopen` is the generator's pre-open copy of the daily indicators;
+    // `premarket` is the overnight bar range. Both existed before the bell.
+    // The session's own open/high/low/close deliberately do not survive.
+    symbols[sym] = { ...(d.preopen || {}), premarket: d.premarket || {}, date: d.date };
+  }
+  return {
+    session_date:   c.session_date,
+    phase:          c.phase,
+    market_closed:  c.market_closed,
+    generated:      c.generated,
+    day_quality:    c.day_quality,
+    regime:         c.regime,
+    vix:            c.vix,
+    vol_regime:     c.vol_regime,
+    windows:        c.windows,
+    symbols,
+    // `outcome` is the verdict on each setup and belongs to the EOD tab.
+    active_patterns: (c.active_patterns || []).map(({ outcome, ...rest }) => rest),
+  };
+}
+
+// The EOD tab is the one view allowed to see what the session did, so it reads
+// the cache unchanged.
+function buildSessionView(c) { return c; }
+
 function renderHeader() {
   const gen    = new Date(cacheData.generated);
   const genStr = gen.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -335,12 +377,12 @@ function renderHeader() {
 // STEP 1: DAY QUALITY GATE
 // =============================================================================
 
-function renderDayQuality() {
-  const grade     = cacheData.day_quality.grade;
-  const scores    = cacheData.day_quality.scores || {};
-  const volRegime = cacheData.vol_regime || {};
+function renderDayQuality(view) {
+  const grade     = view.day_quality.grade;
+  const scores    = view.day_quality.scores || {};
+  const volRegime = view.vol_regime || {};
 
-  if (cacheData.market_closed) {
+  if (view.market_closed) {
     document.getElementById('step1Content').innerHTML = `
       <div style="background: #1e2330; border-left: 4px solid #6b7280; padding: 12px; border-radius: 4px;">
         <strong style="color: #9ca3af;">Market Closed — Weekend</strong><br>
@@ -375,7 +417,7 @@ function renderDayQuality() {
   let html = '';
 
   // --- SPY price + overnight range chart (Step 1 always shows SPY) ---
-  const spyD  = cacheData.symbols['SPY'] || {};
+  const spyD  = view.symbols['SPY'] || {};
   const pmD   = spyD.premarket || {};
   const prX   = gapRange.prior_close;
   const eoX   = gapRange.est_open;
@@ -384,8 +426,9 @@ function renderDayQuality() {
   const lastPx = spyD.close;
 
   if (prX != null) {
-    const gapDol  = eoX != null ? +(eoX - prX).toFixed(2) : null;
-    const gapPctV = (gapDol != null && prX) ? +(gapDol / prX * 100).toFixed(2) : null;
+    // Both stamped by the generator; the page used to subtract these itself.
+    const gapDol  = gapRange.gap_signed ?? null;
+    const gapPctV = gapRange.gap_pct ?? null;
     const gc      = gapDol == null || gapDol === 0 ? '#6b7280' : gapDol > 0 ? '#10b981' : '#ef4444';
     const gSign   = gapDol != null && gapDol >= 0 ? '+' : '';
     const gArr    = gapDol == null || gapDol === 0 ? '→' : gapDol > 0 ? '↑' : '↓';
@@ -410,7 +453,7 @@ function renderDayQuality() {
         </div>`;
       }
     }
-    const posture = dayPosture(grade);
+    const posture = dayPosture(view);
     ps += `
       <div>
         <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Size Posture</div>
@@ -447,10 +490,11 @@ function renderDayQuality() {
     <span style="font-size: 1.5em; font-weight: bold; color: ${gradeColor};">${total}/${max}</span>
   </div>`;
 
-  html += realizedHTML();
+  // "What actually happened" lives on the EOD tab, which already renders it.
+  // Morning Setup states the thesis; the verdict is not a morning fact.
 
   // VIX context row
-  const vix = cacheData.vix || {};
+  const vix = view.vix || {};
   if (vix.current != null) {
     const vixColor = vix.ratio > 1.2 ? '#ef4444' : vix.ratio > 1.0 ? '#f59e0b' : '#10b981';
     const vixLabel = vix.ratio > 1.2 ? 'Elevated' : vix.ratio > 1.0 ? 'Above avg' : 'Below avg';
@@ -458,6 +502,9 @@ function renderDayQuality() {
       <span class="muted">VIX:</span>
       <strong style="color:${vixColor};">${vix.current}</strong>
       <span class="muted" style="font-size:0.8em;">${vix.ratio}× 20d avg (${vix.avg_20d}) — ${vixLabel}</span>
+      ${vix.as_of && vix.as_of !== view.session_date
+        ? `<span class="muted" style="font-size:0.75em;">close of ${vix.as_of}</span>`
+        : ''}
     </div>`;
   }
 
@@ -518,7 +565,7 @@ function renderDayQuality() {
   </div>`;
 
   // ADR pill — SPY only, shows 20-day average daily range vs yesterday's actual range
-  const spySym   = cacheData.symbols['SPY'] || {};
+  const spySym   = view.symbols['SPY'] || {};
   const adr20    = spySym.adr_20d;
   const adr8     = spySym.adr_8d;
   const prevRng  = spySym.prev_range;
@@ -562,8 +609,8 @@ function renderDayQuality() {
 // STEP 2: MARKET REGIME
 // =============================================================================
 
-function renderRegime() {
-  const regime = cacheData.regime;
+function renderRegime(view) {
+  const regime = view.regime;
 
   const regimeColors = { 'Trending': '#3b82f6', 'Ranging': '#f59e0b', 'Choppy': '#ef4444' };
 
@@ -607,10 +654,10 @@ function renderRegime() {
 // STEP 3: PATTERN SCANNER
 // =============================================================================
 
-function renderPatternScanner() {
-  const patterns = cacheData.active_patterns;
-  const regime   = cacheData.regime.label;
-  const data     = cacheData.symbols[selectedSymbol];
+function renderPatternScanner(view) {
+  const patterns = view.active_patterns;
+  const regime   = view.regime.label;
+  const data     = view.symbols[selectedSymbol];
 
   // Every detected pattern is listed. Regime is a preference, not a veto: the
   // Fit column shows the one-point cost of an off-regime setup rather than
@@ -626,7 +673,7 @@ function renderPatternScanner() {
     if (data.above_ma_20 === false)             reasons.push('Below 20-MA');
 
     document.getElementById('step3Content').innerHTML = `
-      ${lowProbabilityHTML()}
+      ${lowProbabilityHTML(view)}
       <div style="color: #6b7280; padding: 12px;">
         No ${selectedSymbol} patterns detected.
         ${reasons.length ? `<span class="muted" style="font-size:0.85em;"> · ${reasons.join(' · ')}</span>` : ''}
@@ -634,7 +681,7 @@ function renderPatternScanner() {
     return;
   }
 
-  let html = `${lowProbabilityHTML()}
+  let html = `${lowProbabilityHTML(view)}
     <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="border-bottom: 2px solid #a7a7ad;">
@@ -669,41 +716,35 @@ function renderPatternScanner() {
 // STEP 4: CONFLUENCE SCORING
 // =============================================================================
 
-function scoreConfluences() {
-  const patterns = cacheData.active_patterns;
-  const regime   = cacheData.regime.label;
+function scoreConfluences(view) {
+  const patterns = view.active_patterns;
 
-  // Regime fit is a preference, not a veto: a mismatch costs one confluence
-  // point. The generator decides the verdict and stamps `regime_match`.
+  // The score is computed and stamped by the generator from pre-open inputs
+  // only, so it is a fact about that morning rather than something re-derived
+  // here against whatever the cache happens to hold now. Scoring in the browser
+  // read today's close and full-day volume out of `symbols[sym]`, which made the
+  // afternoon's score differ from the morning's and let a backtest replaying
+  // these files rank setups using the outcome. Caches written before the score
+  // existed have no `confluence` and are skipped.
   const scored = patterns
-    .filter(p => p.symbol === selectedSymbol)
+    .filter(p => p.symbol === selectedSymbol && p.confluence)
     .map(p => {
-      const regimeMatch = p.regime_match;
       const sym      = p.symbol;
-      const data     = cacheData.symbols[sym];
+      const data     = view.symbols[sym];
       const squeeze  = data.squeeze        || { status: 'unknown', momentum: 0, momentum_increasing: false };
       const vwap     = data.vwap           || { vwap: null, above_vwap: null, distance_pct: null };
       const rsiDiv   = data.rsi_divergence || { signal: 'unknown' };
 
-      const checks = {
-        'Volume > 20d avg (daily)': !!data.volume_above_20d,
-        'PM range active':          !!data.atr_above_avg,
-        'RSI extreme (daily)':      data.rsi_14 < 35 || data.rsi_14 > 65,
-        'MACD aligned (daily)':     p.direction === 'up' ? data.macd_histogram > 0 : data.macd_histogram < 0,
-        'MA(20) aligned (daily)':   p.direction === 'up' ? !!data.above_ma_20 : !data.above_ma_20,
-        'Day A or A+':              ['A', 'A+'].includes(cacheData.day_quality.grade),
-        'Regime matches':           regimeMatch,
-        'Squeeze aligned (hourly)': squeeze.status !== 'none' && squeeze.status !== 'unknown' &&
-                                    (p.direction === 'up' ? squeeze.momentum_increasing === true : squeeze.momentum_increasing === false),
-      };
-
-      const score    = Object.values(checks).filter(Boolean).length;
-      const tradeDay = new Date(cacheData.generated).getDay();
+      const { score, max, checks } = p.confluence;
+      const tradeDay = new Date(view.generated).getDay();
       const weekdayEdge = [2, 3, 4].includes(tradeDay);
-      return { symbol: sym, pattern: p.pattern, direction: p.direction, score, data, checks, squeeze, vwap, rsiDiv, weekdayEdge };
+      return { symbol: sym, pattern: p.pattern, direction: p.direction, levels: p.levels,
+               sizing: p.sizing, plan: p.plan, qualifies: p.qualifies,
+               score, max, checks, data, squeeze, vwap, rsiDiv, weekdayEdge };
     })
     .sort((a, b) => b.score - a.score)
-    .filter(x => x.score >= 3);
+    // `qualifies` is the generator's verdict, from sizing.min_confluence.
+    .filter(x => x.qualifies);
 
   let html = '';
 
@@ -714,11 +755,11 @@ function scoreConfluences() {
 
     scored.forEach(trade => {
       const sc      = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
-      const szLabel = trade.score >= 6 ? 'Full Size' : trade.score >= 4 ? '75% Size' : '50% Size';
+      const szLabel = trade.sizing?.tier_label || '—';
       // Only worth stating when the day scales it — on a full-size day the
       // effective size is the confluence size, and repeating it is noise.
-      const grade   = cacheData.day_quality?.grade;
-      const eff     = dayPosture(grade).factor === 1 ? null : effectiveSize(grade, trade.score);
+      const grade   = view.day_quality?.grade;
+      const eff     = dayPosture(view).factor === 1 ? null : effectiveSize(trade);
       const wdBadge = trade.weekdayEdge
         ? `<span style="background:#22242a; border:1px solid #10b981; color:#10b981; padding:1px 7px; border-radius:3px; font-size:0.75em; margin-left:6px;">Tue–Thu ✓</span>`
         : `<span style="background:#22242a; border:1px solid #4b5563; color:#4b5563; padding:1px 7px; border-radius:3px; font-size:0.75em; margin-left:6px;">Mon/Fri</span>`;
@@ -729,7 +770,7 @@ function scoreConfluences() {
           <div style="font-size: 0.85em; color: #a7a7ad; margin-bottom: 8px;">${trade.pattern}</div>
           <div style="margin-bottom: 10px; display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
             <span style="background: ${sc}; color: white; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold;">
-              ${trade.score}/8 ${getDotsHTML(trade.score, 8)}
+              ${trade.score}/${trade.max} ${getDotsHTML(trade.score, trade.max)}
             </span>
             ${wdBadge}
           </div>
@@ -759,8 +800,8 @@ function scoreConfluences() {
 // STEP 5: TRADE RECOMMENDATIONS
 // =============================================================================
 
-function renderRecommendations(scored) {
-  let html = lowProbabilityHTML();
+function renderRecommendations(view, scored) {
+  let html = lowProbabilityHTML(view);
 
   if (scored.length === 0) {
     html += `<div class="muted">No trades with sufficient confluence today.</div>`;
@@ -768,62 +809,77 @@ function renderRecommendations(scored) {
     html += `<div style="display: flex; flex-wrap: wrap; gap: 12px;">`;
 
     scored.forEach(trade => {
+      // `d` comes from the morning view, so it already holds pre-open values
+      // only — no need to reach for a separate copy.
       const d     = trade.data;
       const atr   = d.atr_14;
       const isUp  = trade.direction === 'up';
-      const atrT1 = (atr * 1.5).toFixed(2);
-      const atrT2 = (atr * 2.0).toFixed(2);
-      const atrSt = atr.toFixed(2);
+      const plan  = trade.plan || {};
+      const atrT1 = (plan.t1_distance ?? 0).toFixed(2);
+      const atrT2 = (plan.t2_distance ?? 0).toFixed(2);
+      const atrSt = (plan.stop_distance ?? 0).toFixed(2);
+      const mT1   = plan.t1_atr ?? '';
+      const mT2   = plan.t2_atr ?? '';
+      const mSt   = plan.stop_atr ?? '';
       const dir   = isUp ? '+' : '−';
       const pat   = trade.pattern;
+      const priorClose = d.prior_close;
+      // Engulfing and Outside Day fire on a completed bar and execute next
+      // session, so their trigger prices come from the generator's `levels`
+      // rather than being re-derived from a session high/low the morning view
+      // does not carry.
+      const lv    = trade.levels || {};
+      const lvEntry = lv.entry != null ? `$${(+lv.entry).toFixed(2)}` : '—';
+      const lvStop  = lv.stop  != null ? `$${(+lv.stop).toFixed(2)}`  : '—';
 
       let entry, stop, target1, target2, target3;
 
       if (pat.includes('Gap Fill')) {
         const orbEntry = pat.includes('ORB');
         entry   = orbEntry ? `${isUp ? 'Short' : 'Buy'} ORB breakout — fade gap to prior close` : `${isUp ? 'Short at open' : 'Buy at open'} — fade gap to prior close`;
-        stop    = `${isUp ? '+' : '−'}$${atrSt} from entry (1x ATR)`;
-        target1 = `Prior close $${(d.close).toFixed(2)} (gap fill)`;
-        target2 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        stop    = `${isUp ? '+' : '−'}$${atrSt} from entry (${mSt}x ATR)`;
+        target1 = `Prior close $${priorClose.toFixed(2)} (gap fill)`;
+        target2 = `${dir}$${atrT1} from entry (${mT1}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else if (pat.includes('Gap Continuation')) {
         const orbEntry = pat.includes('ORB');
         entry   = orbEntry ? `${isUp ? 'Buy' : 'Short'} ORB breakout — continuation` : `${isUp ? 'Buy on open momentum' : 'Short on open momentum'} — gap continuation`;
-        stop    = `${isUp ? '−' : '+'}$${atrSt} from entry (1x ATR)`;
-        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        stop    = `${isUp ? '−' : '+'}$${atrSt} from entry (${mSt}x ATR)`;
+        target1 = `${dir}$${atrT1} from entry (${mT1}x ATR)`;
+        target2 = `${dir}$${atrT2} from entry (${mT2}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else if (pat === 'ORB') {
         entry   = `ORB in play — watch for breakout 10:00–11:30 AM`;
         stop    = `Opposite side of opening range`;
-        target1 = `$${atrT1} from entry (1.5x ATR)`;
-        target2 = `$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        target1 = `$${atrT1} from entry (${mT1}x ATR)`;
+        target2 = `$${atrT2} from entry (${mT2}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else if (pat === 'Outside Day') {
-        entry   = isUp ? `Above $${d.high.toFixed(2)} (today's high)` : `Below $${d.low.toFixed(2)} (today's low)`;
-        stop    = isUp ? `Below $${d.low.toFixed(2)} (today's low)` : `Above $${d.high.toFixed(2)} (today's high)`;
-        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        entry   = `${isUp ? 'Above' : 'Below'} ${lvEntry} (outside-day extreme) — next session`;
+        stop    = `${isUp ? 'Below' : 'Above'} ${lvStop}`;
+        target1 = `${dir}$${atrT1} from entry (${mT1}x ATR)`;
+        target2 = `${dir}$${atrT2} from entry (${mT2}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else if (pat === 'Engulfing') {
-        entry   = isUp ? `Above $${d.high.toFixed(2)} (engulfing candle high)` : `Below $${d.low.toFixed(2)} (engulfing candle low)`;
-        stop    = isUp ? `Below $${d.low.toFixed(2)} (engulfing candle low)` : `Above $${d.high.toFixed(2)} (engulfing candle high)`;
-        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        entry   = `${isUp ? 'Above' : 'Below'} ${lvEntry} (engulfing candle) — next session`;
+        stop    = `${isUp ? 'Below' : 'Above'} ${lvStop}`;
+        target1 = `${dir}$${atrT1} from entry (${mT1}x ATR)`;
+        target2 = `${dir}$${atrT2} from entry (${mT2}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else {
         entry   = 'Pattern-specific entry';
-        stop    = `$${atrSt} from entry (1x ATR)`;
-        target1 = `${dir}$${atrT1} from entry (1.5x ATR)`;
-        target2 = `${dir}$${atrT2} from entry (2x ATR)`;
-        target3 = `Trailing $${atrSt} (1x ATR)`;
+        stop    = `$${atrSt} from entry (${mSt}x ATR)`;
+        target1 = `${dir}$${atrT1} from entry (${mT1}x ATR)`;
+        target2 = `${dir}$${atrT2} from entry (${mT2}x ATR)`;
+        target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       }
 
       const sc           = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
-      const vwapColor    = trade.vwap.above_vwap === null ? '#6b7280' : trade.vwap.above_vwap ? '#10b981' : '#ef4444';
-      const vwapLabel    = trade.vwap.vwap !== null
-        ? `$${trade.vwap.vwap.toFixed(2)} (${trade.vwap.distance_pct > 0 ? '+' : ''}${trade.vwap.distance_pct}%)`
-        : 'N/A';
+      const pmRsi        = d.rsi_14;
+      const pmMacd       = d.macd_histogram;
+      const pmAboveMa    = d.above_ma_20;
+      const pmSqueeze    = trade.squeeze;
+      const pmRsiDiv     = trade.rsiDiv;
       const rsidivColors = { bullish: '#10b981', bearish: '#ef4444', both: '#f97316', none: '#4b5563', unknown: '#6b7280' };
       const rsidivLabels = { bullish: '▲ Bullish', bearish: '▼ Bearish', both: '⚡ Both', none: 'None', unknown: 'N/A' };
 
@@ -836,11 +892,11 @@ function renderRecommendations(scored) {
                 ${trade.pattern} ${trade.direction}
               </span>
             </div>
-            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/8 ${getDotsHTML(trade.score, 8)}</span>
+            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/${trade.max} ${getDotsHTML(trade.score, trade.max)}</span>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; font-size: 0.85em;">
-            <div><div class="muted">Price</div><strong>$${d.close.toFixed(2)}</strong></div>
+            <div><div class="muted">Prior Close</div><strong>$${priorClose.toFixed(2)}</strong></div>
             <div><div class="muted">ATR (14)</div><strong>${atr.toFixed(2)}</strong></div>
           </div>
 
@@ -855,30 +911,26 @@ function renderRecommendations(scored) {
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.8em;">
             <div style="background: #22242a; padding: 8px; border-radius: 8px;">
               <div class="muted">RSI</div>
-              <strong>${d.rsi_14.toFixed(1)}</strong>
-              ${trade.rsiDiv.signal !== 'none' && trade.rsiDiv.signal !== 'unknown'
-                ? `<div style="color: ${rsidivColors[trade.rsiDiv.signal]}; font-size: 0.85em; margin-top: 2px;">${rsidivLabels[trade.rsiDiv.signal]}</div>`
+              <strong>${pmRsi.toFixed(1)}</strong>
+              ${pmRsiDiv.signal !== 'none' && pmRsiDiv.signal !== 'unknown'
+                ? `<div style="color: ${rsidivColors[pmRsiDiv.signal]}; font-size: 0.85em; margin-top: 2px;">${rsidivLabels[pmRsiDiv.signal]}</div>`
                 : ''}
             </div>
             <div style="background: #22242a; padding: 8px; border-radius: 8px;">
               <div class="muted">MACD</div>
-              <span style="color: ${d.macd_histogram > 0 ? '#10b981' : '#ef4444'};">
-                ${d.macd_histogram > 0 ? '▲ Bull' : '▼ Bear'}
+              <span style="color: ${pmMacd > 0 ? '#10b981' : '#ef4444'};">
+                ${pmMacd > 0 ? '▲ Bull' : '▼ Bear'}
               </span>
             </div>
             <div style="background: #22242a; padding: 8px; border-radius: 8px;">
               <div class="muted">MA(20)</div>
-              <span style="color: ${d.above_ma_20 ? '#10b981' : '#ef4444'};">
-                ${d.above_ma_20 ? '▲ Above' : '▼ Below'}
+              <span style="color: ${pmAboveMa ? '#10b981' : '#ef4444'};">
+                ${pmAboveMa ? '▲ Above' : '▼ Below'}
               </span>
             </div>
             <div style="background: #22242a; padding: 8px; border-radius: 8px;">
               <div class="muted">Squeeze</div>
-              ${squeezeHTML(trade.squeeze)}
-            </div>
-            <div style="background: #22242a; padding: 8px; border-radius: 8px;">
-              <div class="muted">VWAP</div>
-              <span style="color: ${vwapColor};">${vwapLabel}</span>
+              ${squeezeHTML(pmSqueeze)}
             </div>
           </div>
         </div>`;
@@ -1058,7 +1110,7 @@ function renderEodOutcomes(scored) {
   } else {
     const confCards = scored.map(trade => {
       const sc      = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
-      const szLabel = trade.score >= 6 ? 'Full Size' : trade.score >= 4 ? '75% Size' : '50% Size';
+      const szLabel = trade.sizing?.tier_label || '—';
       const checksHTML = Object.entries(trade.checks).map(([k, v]) =>
         `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
       ).join('');
@@ -1240,8 +1292,12 @@ function renderAll() {
     document.getElementById(id).style.display = '';
   });
 
+  // Built once per render. Morning renderers get `morning` and can only see
+  // pre-open fields; the EOD tab reads the full cache directly.
+  const morning = buildMorningView(cacheData);
+
   renderHeader();
-  renderDayQuality();
+  renderDayQuality(morning);
 
   if (cacheData.market_closed) {
     ['step-2','step-3','step-4','step-5'].forEach(id => {
@@ -1266,11 +1322,11 @@ function renderAll() {
       </div>`);
   }
 
-  renderRegime();
-  renderPatternScanner();
-  const scored = scoreConfluences();
+  renderRegime(morning);
+  renderPatternScanner(morning);
+  const scored = scoreConfluences(morning);
   scoredTrades = scored;
-  renderRecommendations(scored);
+  renderRecommendations(morning, scored);
   renderEodOutcomes(scored);
 }
 
@@ -1357,13 +1413,10 @@ async function init() {
     });
     selector.addEventListener('change', () => {
       selectedSymbol = selector.value;
-      if (!cacheData.market_closed && !['C', 'F'].includes(cacheData.day_quality.grade)) {
-        renderPatternScanner();
-        const scored = scoreConfluences();
-        scoredTrades = scored;
-        renderRecommendations(scored);
-        renderEodOutcomes(scored);
-      }
+      // renderAll rebuilds the morning view and passes it to every renderer.
+      // Calling the renderers directly here left them on their pre-view-model
+      // signatures, and re-applied a C/F veto the page no longer honours.
+      renderAll();
     });
 
     const picker = document.getElementById('tradeDatePicker');

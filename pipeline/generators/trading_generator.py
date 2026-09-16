@@ -74,7 +74,17 @@ def _load_config() -> tuple:
     regimes = config.get("regimes")
     if not regimes:
         raise ValueError("trading_config.json has no `regimes` block")
-    return trading_symbols, regime_symbols, ticker_map, regimes
+    # Sizing and target multiples are config for the same reason regimes are:
+    # the page used to hold its own copies, and the ATR multiples existed here
+    # *and* in trade.js. Fail loudly rather than defaulting — a missing block
+    # would silently size every trade at 100%.
+    sizing = config.get("sizing")
+    if not sizing:
+        raise ValueError("trading_config.json has no `sizing` block")
+    targets = config.get("targets")
+    if not targets:
+        raise ValueError("trading_config.json has no `targets` block")
+    return trading_symbols, regime_symbols, ticker_map, regimes, sizing, targets
 
 
 def _calculate_ema(values: list, period: int) -> list:
@@ -442,26 +452,32 @@ def _compute_premarket_metrics(hourly_points, target_date):
     }
 
 
-def _load_vix() -> dict:
-    path = DATA_DIR / 'fred' / 'VIXCLS.csv'
-    if not path.exists():
+def _load_vix(vix_daily, session_date, session_complete) -> dict:
+    """VIX level and its 20-day average, from the Yahoo daily bars in SQLite.
+
+    VIX comes down the Yahoo path with every other price on this page — it is
+    already in the fetch list via config/macro_config.json — rather than out of
+    FRED. This previously read data/fred/VIXCLS.csv, deleted along with the other
+    per-series CSVs, and so returned None on every run; the VIX row silently
+    vanished from Step 1.
+
+    Phase contract applies: before the close, only bars from prior sessions.
+    """
+    bars = _completed_bars(vix_daily) if session_complete else _prior_bars(vix_daily, session_date)
+    # Never read past the session being reported. VIX is fetched independently of
+    # the trading symbols, so it can be a session ahead of them — a backfill run
+    # for an old date especially.
+    if session_date:
+        bars = [b for b in bars if _bar_date(b) <= session_date]
+    closes = [b[1]['close'] for b in bars if b[1].get('close') is not None]
+    if not closes:
         return None
-    import csv as _csv
-    vals = []
-    with open(path, newline='') as f:
-        for row in _csv.DictReader(f):
-            try:
-                v = row.get('Value', '').strip()
-                if v and v != '.':
-                    vals.append(float(v))
-            except ValueError:
-                continue
-    if not vals:
-        return None
-    current = vals[-1]
-    avg_20d = sum(vals[-20:]) / min(20, len(vals))
+
+    current = closes[-1]
+    avg_20d = sum(closes[-20:]) / min(20, len(closes))
     return {'current': round(current, 2), 'avg_20d': round(avg_20d, 2),
-            'ratio': round(current / avg_20d, 2) if avg_20d else None}
+            'ratio': round(current / avg_20d, 2) if avg_20d else None,
+            'as_of': _bar_date(bars[-1]).isoformat()}
 
 
 def _compute_alignment_score(regime_symbols, hourly_data, target_date) -> tuple:
@@ -564,6 +580,12 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label,
                 break
     gap_pts   = abs(est_open - prior_close) if est_open is not None else 0.0
     gap_ratio = round(gap_pts / median_gap, 2) if median_gap > 0 else 0.0
+    # Signed, because direction drives the arrow and colour on the page — which
+    # was subtracting est_open from prior_close itself. `gap_pts` above stays
+    # unsigned since the ratio and the score only care about magnitude.
+    gap_signed = round(est_open - prior_close, 2) if est_open is not None else None
+    gap_pct    = round(gap_signed / prior_close * 100, 2) \
+                 if (gap_signed is not None and prior_close) else None
     has_gap   = gap_ratio >= 0.5
     gap_range_score = 2 if (has_gap and has_pm_range) else 1 if (has_gap or has_pm_range) else 0
 
@@ -588,6 +610,7 @@ def _grade_day_quality(points, hourly_points, target_date, regime_label,
         'gap_range': {
             'score': gap_range_score, 'has_gap': has_gap, 'has_pm_range': has_pm_range,
             'gap_pts': round(gap_pts, 2), 'gap_ratio': gap_ratio,
+            'gap_signed': gap_signed, 'gap_pct': gap_pct,
             'median_gap': round(median_gap, 2), 'prior_close': round(prior_close, 2),
             'est_open': round(est_open, 2) if est_open is not None else None,
             'pm_range_ratio': pm['range'].get('ratio'),
@@ -806,6 +829,151 @@ def _resolve_prior_setups(daily_points):
     return resolutions
 
 
+def _prior_intraday(bars, session_date):
+    """Intraday bars from sessions before session_date."""
+    if session_date is None:
+        return bars
+    return [p for p in bars if bar_session_date(p[0]) < session_date]
+
+
+def _premarket_indicators(points, hourly, bars_5m, session_date):
+    """Indicator values as they stood before the session opened.
+
+    Confluence is a pre-open judgement, so every input here comes from completed
+    prior sessions plus the overnight/premarket window. Nothing reads the
+    session's own daily bar: its close and full-day volume do not exist when the
+    call is made, and a backtest reading them would rank setups using the answer.
+    """
+    prior = _prior_bars(points, session_date)
+    if not prior:
+        return None
+
+    last      = prior[-1][1]
+    rsi_vals  = _calculate_rsi(prior, 14)
+    macd      = _calculate_macd(prior)
+    ma20_vals = _calculate_moving_average(prior, 20)
+    vols      = [p[1]['volume'] for p in prior[-20:]]
+    vol_20d   = sum(vols) / len(vols) if vols else 0
+    macd_hist = (macd['line'][-1][1] - macd['signal'][-1][1]) \
+                if macd['line'] and macd['signal'] else 0.0
+
+    # The ATR fallback is measured on prior sessions too. Reading the live
+    # atr_current here would have leaked the session's own high/low into the
+    # score on any day with no premarket bars.
+    atr_vals    = _calculate_atr(prior, 14)
+    atr_prior   = atr_vals[-1][1] if atr_vals else 0.0
+    atr_prior_avg = sum(a[1] for a in atr_vals[-20:]) / min(20, len(atr_vals)) if atr_vals else 0.0
+
+    pm = _compute_premarket_metrics(bars_5m, session_date) if bars_5m else None
+    pm_range_active = (pm['range']['ratio'] >= 0.7) if (pm and pm.get('has_range')) \
+                      else (atr_prior > atr_prior_avg)
+
+    prior_hourly = _prior_intraday(hourly, session_date)
+    squeeze = _calculate_squeeze(prior_hourly) if prior_hourly else \
+              {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
+    rsi_div = _calculate_rsi_divergence(prior_hourly) if prior_hourly else \
+              {'signal': 'unknown', 'description': 'No hourly data'}
+
+    return {
+        'prior_close':      round(last['close'], 2),
+        'rsi_14':           round(rsi_vals[-1][1], 1) if rsi_vals else 50.0,
+        'macd_histogram':   round(macd_hist, 4),
+        'above_ma_20':      last['close'] > (ma20_vals[-1][1] if ma20_vals else last['close']),
+        'volume_above_20d': last['volume'] > vol_20d if vol_20d > 0 else False,
+        'pm_range_active':  pm_range_active,
+        'squeeze':          squeeze,
+        'rsi_divergence':   rsi_div,
+        'atr_14':           round(atr_prior, 2),
+    }
+
+
+CONFLUENCE_MAX = 8
+
+
+def _score_confluence(direction, pm, day_grade, regime_match):
+    """Step 4 confluence score, 0-8, from pre-open inputs only.
+
+    Scored here rather than in the browser so the number is a stamped fact about
+    the morning: the page renders it and the portfolio backtest ranks on it,
+    with no second implementation to drift. Because every input comes from
+    `_premarket_indicators`, the result is phase-invariant — the post-close run
+    recomputes the identical score rather than overwriting a morning value with
+    an afternoon one, so nothing has to be preserved across runs.
+    """
+    if pm is None:
+        return None
+    is_up   = direction == 'up'
+    squeeze = pm['squeeze']
+    checks = {
+        'Volume > 20d avg (daily)': bool(pm['volume_above_20d']),
+        'PM range active':          bool(pm['pm_range_active']),
+        'RSI extreme (daily)':      pm['rsi_14'] < 35 or pm['rsi_14'] > 65,
+        'MACD aligned (daily)':     pm['macd_histogram'] > 0 if is_up else pm['macd_histogram'] < 0,
+        'MA(20) aligned (daily)':   bool(pm['above_ma_20']) if is_up else not pm['above_ma_20'],
+        'Day A or A+':              day_grade in ('A', 'A+'),
+        'Regime matches':           bool(regime_match),
+        'Squeeze aligned (hourly)': squeeze['status'] not in ('none', 'unknown') and
+                                    (squeeze['momentum_increasing'] is True if is_up
+                                     else squeeze['momentum_increasing'] is False),
+    }
+    return {'score': sum(1 for v in checks.values() if v),
+            'max': CONFLUENCE_MAX,
+            'checks': checks}
+
+
+def _size_trade(day_grade, score, sizing_config):
+    """Position size as a percentage of the day's normal size.
+
+    Two inputs, per docs/trading-rules.md: the day grade sets a posture for the
+    whole session, and each setup's confluence scales within it. Regime is not
+    one of them — it gates which patterns are valid, never the size.
+
+    Lived in the browser until now, which meant the backtester had no way to
+    size a trade without a second copy of the tables.
+    """
+    day_factor = sizing_config['day_posture'].get(day_grade, 1.0)
+    conf_factor, tier_label = 0.0, None
+    for tier in sizing_config['confluence_tiers']:
+        if score >= tier['min']:
+            conf_factor, tier_label = tier['factor'], tier['label']
+            break
+    return {
+        'day_factor':        day_factor,
+        'confluence_factor': conf_factor,
+        'effective_pct':     round(day_factor * conf_factor * 100, 1),
+        'tier_label':        tier_label,
+    }
+
+
+def _plan_levels(direction, entry, atr, targets_config):
+    """Stop and targets as ATR multiples off an entry.
+
+    The same 1.5x / 2.0x multiples were written here *and* in trade.js. They now
+    come from config and are stamped, so the page and the backtester read one
+    set of numbers. `entry` is None for setups whose trigger only exists once
+    the session is running — the multiples still describe the plan, so the
+    distances are emitted even when the absolute levels cannot be.
+    """
+    mult = 1 if direction == 'up' else -1
+    plan = {
+        'stop_atr': targets_config['stop_atr'],
+        't1_atr':   targets_config['t1_atr'],
+        't2_atr':   targets_config['t2_atr'],
+        'stop_distance': round(targets_config['stop_atr'] * atr, 2),
+        't1_distance':   round(targets_config['t1_atr']   * atr, 2),
+        't2_distance':   round(targets_config['t2_atr']   * atr, 2),
+        'entry': None, 'stop': None, 't1': None, 't2': None,
+    }
+    if entry is not None:
+        plan.update({
+            'entry': round(entry, 2),
+            'stop':  round(entry - mult * targets_config['stop_atr'] * atr, 2),
+            't1':    round(entry + mult * targets_config['t1_atr']   * atr, 2),
+            't2':    round(entry + mult * targets_config['t2_atr']   * atr, 2),
+        })
+    return plan
+
+
 def _calculate_eod_outcomes(points, hourly_points, gap, atr_14):
     result = {
         'orb_high': None, 'orb_low': None, 'orb_breached_up': False, 'orb_breached_down': False,
@@ -844,7 +1012,9 @@ def _calculate_eod_outcomes(points, hourly_points, gap, atr_14):
 
 
 def _generate_trading_signals(db, cache_dir, target_date=None):
-    trading_symbols, regime_symbols, _, regime_config = _load_config()
+    trading_symbols, regime_symbols, _, regime_config, sizing_config, targets_config = _load_config()
+    _t1_atr = targets_config['t1_atr']
+    _t2_atr = targets_config['t2_atr']
     symbols = trading_symbols
     if not symbols:
         raise ValueError("No trading symbols in trading_config.json")
@@ -914,14 +1084,23 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
     output['session_complete'] = session_complete
 
     expansion = _compute_expansion_evidence(spy_daily, spy_5m, spy_date, session_complete)
-    output['regime'] = _detect_regime(regime_symbols, daily_data, hourly_data,
+    # Regime is Step 2 of a pre-open framework, so it reads prior sessions only.
+    # `_completed_bars` inside _detect_regime treats today's bar as fair game
+    # once the session closes, which made the post-close label differ from the
+    # morning's and — because `regime_match` feeds a confluence point — let the
+    # score depend on the day it was scoring.
+    _prior_daily  = {s: _prior_bars(p, spy_date)     for s, p in daily_data.items()}
+    _prior_hourly = {s: _prior_intraday(p, spy_date) for s, p in hourly_data.items()}
+    output['regime'] = _detect_regime(regime_symbols, _prior_daily, _prior_hourly,
                                       session_date=spy_date,
                                       session_complete=session_complete,
                                       expansion=expansion,
                                       regime_config=regime_config)
-    output['vix']    = _load_vix()
+    output['vix']    = _load_vix(db.load_daily_ohlcv('VIX'), spy_date, session_complete)
 
     _align_score, _align_detail = _compute_alignment_score(regime_symbols, hourly_data, spy_date)
+
+    premarket_by_symbol: dict = {}
 
     for symbol in symbols:
         points = daily_data.get(symbol, [])
@@ -980,6 +1159,7 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
         squeeze         = _calculate_squeeze(hourly) if hourly else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
         vwap            = _calculate_vwap(bars_5m) if bars_5m else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
         rsi_div         = _calculate_rsi_divergence(hourly) if hourly else {'signal': 'unknown', 'description': 'No hourly data'}
+        premarket_by_symbol[symbol] = _premarket_indicators(points, hourly, bars_5m, spy_date)
 
         # ADR: average daily range on prior complete bars only (date-anchored —
         # points[:-1] drops a real prior session whenever today's bar is absent).
@@ -1000,7 +1180,12 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                     adr_8d=adr_8d, adr_20d=adr_20d,
                     alignment_score=_align_score, alignment_detail=_align_detail,
                 )
-                output['day_quality'] = {'grade': day_grade, 'scores': scores}
+                # The factor is the rule; the page turns it into "Full" / "Half"
+                # / "No trades". Numbers here, words there.
+                output['day_quality'] = {
+                    'grade': day_grade, 'scores': scores,
+                    'posture_factor': sizing_config['day_posture'].get(day_grade, 1.0),
+                }
                 output['day_realized'] = _grade_realized(
                     points, spy_date, eod_outcome, day_grade, scores.get('total'),
                 ) if session_complete else {}
@@ -1017,6 +1202,12 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             'atr_14':  round(atr_current, 2),
             'atr_20d_avg': round(atr_20day_avg, 2),
             'atr_above_avg': pm_range_active,
+            # Pre-open copies of the same indicators. The fields above carry the
+            # session's own bar once it closes, which is right for an EOD view
+            # and wrong for the morning one — Step 5 was rendering closing values
+            # beside Step 4 checks scored on these, so a card could show
+            # "MACD aligned" next to a bearish MACD.
+            'preopen': premarket_by_symbol[symbol],
             'rsi_14':  round(rsi_current, 1),
             'macd_line':      round(macd_line_val, 4),
             'macd_signal':    round(macd_signal_val, 4),
@@ -1072,8 +1263,8 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 gap_pattern_name, gap_direction = 'Gap Continuation', gap['gap_type']
                 gap_key = 'gap_continuation'
                 gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · Trending"
-                t1_cont = round(today_open_val + 1.5 * atr_current * mult, 2)
-                t2_cont = round(today_open_val + 2.0 * atr_current * mult, 2)
+                t1_cont = round(today_open_val + _t1_atr * atr_current * mult, 2)
+                t2_cont = round(today_open_val + _t2_atr * atr_current * mult, 2)
                 gap_levels = {'prev_close': prev_close_val, 'today_open': today_open_val,
                               't1_continuation': t1_cont, 't2_continuation': t2_cont,
                               'atr': round(atr_current, 2)}
@@ -1096,10 +1287,10 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
             orb_l = eod_outcome.get('orb_low')  or 0.0
             orb_levels = {
                 'orb_high': eod_outcome.get('orb_high'), 'orb_low': eod_outcome.get('orb_low'),
-                't1_up':   round(orb_h + 1.5 * atr_current, 2) if orb_h else None,
-                't1_down': round(orb_l - 1.5 * atr_current, 2) if orb_l else None,
-                't2_up':   round(orb_h + 2.0 * atr_current, 2) if orb_h else None,
-                't2_down': round(orb_l - 2.0 * atr_current, 2) if orb_l else None,
+                't1_up':   round(orb_h + _t1_atr * atr_current, 2) if orb_h else None,
+                't1_down': round(orb_l - _t1_atr * atr_current, 2) if orb_l else None,
+                't2_up':   round(orb_h + _t2_atr * atr_current, 2) if orb_h else None,
+                't2_down': round(orb_l - _t2_atr * atr_current, 2) if orb_l else None,
                 'atr': round(atr_current, 2),
             }
             if gap_levels:
@@ -1150,8 +1341,8 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 'symbol': symbol, 'pattern': 'Engulfing', 'direction': 'up' if is_up else 'down',
                 'notes': f"{'Bullish' if is_up else 'Bearish'} engulfing, vol confirmed",
                 'levels': {'entry': entry, 'stop': stop,
-                           't1': round(entry + 1.5 * atr_current * mult, 2),
-                           't2': round(entry + 2.0 * atr_current * mult, 2), 'atr': round(atr_current, 2)},
+                           't1': round(entry + _t1_atr * atr_current * mult, 2),
+                           't2': round(entry + _t2_atr * atr_current * mult, 2), 'atr': round(atr_current, 2)},
                 'outcome': {'next_day': True, 'note': f"Enter {'above' if is_up else 'below'} ${entry:.2f} next session"},
                 **_pattern_keys(['engulfing'], favored_patterns),
             })
@@ -1171,6 +1362,32 @@ def _generate_trading_signals(db, cache_dir, target_date=None):
                 'outcome': {'next_day': True, 'note': f"Enter {'above' if is_up else 'below'} ${entry:.2f} next session"},
                 **_pattern_keys(['outside_day'], favored_patterns),
             })
+
+    # Stamped after every pattern exists, so Step 4 no longer has to re-derive it
+    # in the browser. Pre-open inputs only — see _score_confluence.
+    _pre_grade = output.get('day_quality', {}).get('grade')
+    _min_conf  = sizing_config['min_confluence']
+    for _p in output['active_patterns']:
+        _conf = _score_confluence(_p['direction'], premarket_by_symbol.get(_p['symbol']),
+                                  _pre_grade, _p.get('regime_match'))
+        if not _conf:
+            continue
+        _p['confluence'] = _conf
+        # `qualifies` is the verdict on whether a setup is worth taking at all.
+        # The page used to apply its own `score >= 3`; stamping it means the
+        # page and the backtester cannot disagree about which setups were live.
+        _p['qualifies'] = _conf['score'] >= _min_conf
+        _p['sizing']    = _size_trade(_pre_grade, _conf['score'], sizing_config)
+        _lv    = _p.get('levels') or {}
+        _entry = _lv.get('entry') if isinstance(_lv.get('entry'), (int, float)) else None
+        # Pre-open ATR, not `levels.atr` — the plan is the morning's, and
+        # `levels.atr` carries the session's own range once it closes. Sizing a
+        # stop off the day's realised volatility is not a distance anyone could
+        # have used at the open.
+        _pm    = premarket_by_symbol.get(_p['symbol']) or {}
+        _atr   = _pm.get('atr_14') or _lv.get('atr')
+        if _atr:
+            _p['plan'] = _plan_levels(_p['direction'], _entry, _atr, targets_config)
 
     data_date = spy_date or now_utc.date()
 

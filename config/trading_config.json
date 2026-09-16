@@ -1,27 +1,105 @@
 {
   "symbols": [
-    {"symbol": "SPY", "name": "S&P 500 ETF",              "regime": true},
-    {"symbol": "QQQ", "name": "Nasdaq 100 ETF",            "regime": true},
-    {"symbol": "IWM", "name": "Russell 2000 ETF",          "regime": true},
-    {"symbol": "SMH", "name": "VanEck Semiconductor ETF"},
-    {"symbol": "BTC", "name": "Bitcoin",                   "ticker": "BTC-USD"},
-    {"symbol": "ETH", "name": "Ethereum",                  "ticker": "ETH-USD"},
-    {"symbol": "GLD", "name": "Gold ETF"},
-    {"symbol": "SLV", "name": "Silver ETF"},
-    {"symbol": "USO", "name": "United States Oil ETF"}
+    {
+      "symbol": "SPY",
+      "name": "S&P 500 ETF",
+      "regime": true
+    },
+    {
+      "symbol": "QQQ",
+      "name": "Nasdaq 100 ETF",
+      "regime": true
+    },
+    {
+      "symbol": "IWM",
+      "name": "Russell 2000 ETF",
+      "regime": true
+    },
+    {
+      "symbol": "SMH",
+      "name": "VanEck Semiconductor ETF"
+    },
+    {
+      "symbol": "BTC",
+      "name": "Bitcoin",
+      "ticker": "BTC-USD"
+    },
+    {
+      "symbol": "ETH",
+      "name": "Ethereum",
+      "ticker": "ETH-USD"
+    },
+    {
+      "symbol": "GLD",
+      "name": "Gold ETF"
+    },
+    {
+      "symbol": "SLV",
+      "name": "Silver ETF"
+    },
+    {
+      "symbol": "USO",
+      "name": "United States Oil ETF"
+    }
   ],
   "regimes": {
     "Trending": {
-      "patterns": ["orb", "gap_fill", "gap_continuation", "engulfing"],
+      "patterns": [
+        "orb",
+        "gap_fill",
+        "gap_continuation",
+        "engulfing"
+      ],
       "note": "with the trend"
     },
     "Ranging": {
-      "patterns": ["gap_fill", "gap_continuation", "outside_day", "engulfing"],
+      "patterns": [
+        "gap_fill",
+        "gap_continuation",
+        "outside_day",
+        "engulfing"
+      ],
       "note": "engulfing at support/resistance"
     },
     "Choppy": {
-      "patterns": ["gap_fill", "outside_day", "engulfing"],
-      "note": "mean reversion — fade, don't chase"
+      "patterns": [
+        "gap_fill",
+        "outside_day",
+        "engulfing"
+      ],
+      "note": "mean reversion \u2014 fade, don't chase"
     }
+  },
+  "sizing": {
+    "day_posture": {
+      "A+": 1.0,
+      "A": 1.0,
+      "B": 0.5,
+      "C": 0.0,
+      "F": 0.0
+    },
+    "confluence_tiers": [
+      {
+        "min": 6,
+        "factor": 1.0,
+        "label": "Full Size"
+      },
+      {
+        "min": 4,
+        "factor": 0.75,
+        "label": "75% Size"
+      },
+      {
+        "min": 3,
+        "factor": 0.5,
+        "label": "50% Size"
+      }
+    ],
+    "min_confluence": 3
+  },
+  "targets": {
+    "t1_atr": 1.5,
+    "t2_atr": 2.0,
+    "stop_atr": 1.0
   }
 }

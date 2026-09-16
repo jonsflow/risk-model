@@ -1,0 +1,30 @@
+{
+  "starting_capital": 10000,
+  "start_date": "2026-07-09",
+  "symbols": ["SPY"],
+
+  "sizing": {
+    "max_position_pct": 10,
+    "apply_day_posture": true,
+    "apply_confluence": true,
+    "max_risk_pct": null
+  },
+
+  "selection": {
+    "min_confluence": 3,
+    "skip_grades": ["C", "F"]
+  },
+
+  "fills": {
+    "entry": "bar_close",
+    "stop_exit": "bar_close",
+    "target_exit": "touch",
+    "gap_fill_entry": "first_bar",
+    "gap_fill_stop_atr": 1.0,
+    "orb_stop": "range_opposite",
+    "orb_target_atr": 1.5,
+    "min_gap_pct": 0.1,
+    "slippage_bps": 0,
+    "commission_per_trade": 0
+  }
+}
