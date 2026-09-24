@@ -6,6 +6,7 @@ on:
     # One cron per ET slot, updated by hand at each DST changeover. A previous
     # multi-cron + wall-time-gate version was tried and removed for complexity.
     # Currently set for EDT; shift both to 14:00 / 21:15 UTC when clocks go back.
+    # Runs have started 4-5h late since GitHub's 2026-08-26 Actions incident.
     - cron: "0 13 * * 1-5"   # 09:00 ET
     - cron: "15 20 * * 1-5"  # 16:15 ET
 
