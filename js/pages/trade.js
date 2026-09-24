@@ -1354,7 +1354,7 @@ async function loadAndRender(dateStr) {
     return;
   }
 
-  const url = (dateStr === latestDate || !dateStr)
+  const url = (!dateStr || dateStr === todayET() || dateStr === latestDate)
     ? 'data/cache/trading_signals.json'
     : `data/cache/trading_signals_${dateStr}.json`;
 
@@ -1441,11 +1441,10 @@ async function init() {
     if (isWeekend(today)) {
       viewingDate = today;
       renderWeekend(today);
-    } else if (today === latestDate) {
+    } else {
+      // Today reads trading_signals.json; dated caches are only for past days.
       viewingDate = today;
       renderAll();
-    } else {
-      await loadAndRender(today);
     }
 
   } catch (error) {
