@@ -32,6 +32,7 @@
           <label for="tradeDatePicker" class="muted" style="font-size: 0.85em;">Date:</label>
           <input type="date" id="tradeDatePicker" style="background: #22242a; color: #e2e8f0; border: 1px solid #374151; border-radius: 4px; padding: 4px 8px; font-size: 0.85em;">
           <button id="tradeDateToday" style="background: #374151; color: #e2e8f0; border: none; border-radius: 4px; padding: 4px 10px; font-size: 0.85em; cursor: pointer;">Today</button>
+          <a id="recapLink" href="pages/trade_recap.html" style="color: #7aa2f7; font-size: 0.85em; text-decoration: none;">Recap →</a>
         </div>
       </div>
     </div>
@@ -40,7 +41,6 @@
   <!-- Sub-tab bar -->
   <div class="tab-bar" style="margin: 0 0 16px 0;">
     <button class="tab-btn active" data-tab="morning" onclick="switchTradeTab('morning')">Morning Setup</button>
-    <button class="tab-btn" data-tab="eod" onclick="switchTradeTab('eod')">End of Day</button>
     <button class="tab-btn" data-tab="logic" onclick="switchTradeTab('logic')">Signal Logic</button>
   </div>
 
@@ -69,6 +69,18 @@
       <div id="step3Content"></div>
     </div>
 
+    <!-- Open stage -->
+    <div class="card" id="step-open">
+      <h2>Open — First 5-Minute Bar</h2>
+      <div id="openContent"></div>
+    </div>
+
+    <!-- Opening-range stage -->
+    <div class="card" id="step-or">
+      <h2>Opening Range</h2>
+      <div id="orContent"></div>
+    </div>
+
     <!-- Step 4: Confluence Scoring -->
     <div class="card" id="step-4">
       <h2>Step 4 — Confluence Scoring</h2>
@@ -82,18 +94,6 @@
     </div>
 
     <!-- Step 6: Position Size Calculator -->
-  </div>
-
-  <!-- End of Day panel -->
-  <div id="tab-eod" class="tab-panel">
-    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:12px;">
-      <div id="eodWindowLabel" class="muted" style="font-size: 0.8em;"></div>
-      <a class="report-data-issue muted" href="#" target="_blank" rel="noopener" style="font-size:0.75em;text-decoration:none;white-space:nowrap;">⚠ Report a data issue</a>
-    </div>
-    <div class="card">
-      <h2>End of Day — Setup Outcomes</h2>
-      <div id="eodContent">Loading…</div>
-    </div>
   </div>
 
   <!-- Signal Logic panel (loaded from pages/trade_logic.html — single source of truth) -->

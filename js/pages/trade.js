@@ -1,27 +1,16 @@
 // js/pages/trade.js — Trade Recommendations page (ES module).
+//
+// The live page for one session. It loads trading_signals_<date>.json and
+// renders each stage as it lands: premarket (Steps 1-3), the open, and the
+// opening range (Steps 4-5). A stage whose data isn't there yet shows the
+// generator's not-available message. The recap is pages/trade_recap.html.
 import { renderNav } from '../components/Navigation.js';
+import { todayET, isWeekend, hasStage, stageMessage, loadSession, gradeColor, gradeLabel,
+         getDotsHTML, noticeHTML, fillSymbolSelector } from '../core/trade-common.js';
 
-let cacheData      = null;
-let scoredTrades   = null;
-let latestDate     = null;
+let session        = null;   // the loaded trading_signals_<date>.json
 let selectedSymbol = 'SPY';
-let viewingDate    = null;   // Date the user is currently looking at (vs todayET)
-
-// The generator states which run produced this file: 'premarket' | 'intraday' |
-// 'eod'. Only an 'eod' file describes a finished session. Older cache files
-// predate the field, so fall back to the previous eod_outcome sniff for those —
-// but never prefer the sniff, since a mid-session run populates eod_outcome with
-// partial-day numbers that look complete.
-function sessionPhase() {
-  return cacheData.phase || null;
-}
-
-function isEodReady() {
-  const phase = sessionPhase();
-  if (phase) return cacheData.session_complete === true || phase === 'eod';
-  const spy = cacheData.symbols?.SPY || {};
-  return Object.keys(spy.eod_outcome || {}).length > 0;
-}
+let viewingDate    = null;
 
 // -----------------------------------------------------------------------------
 // Regime → favoured patterns.
@@ -65,20 +54,6 @@ function favoredLabel(regime) {
   return fav.note ? `${names} (${fav.note})` : names;
 }
 
-function todayET() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/New_York' });
-}
-
-function isMarketOpenForDate(dateStr) {
-  // Returns true if the session for dateStr is complete. The generator decides
-  // this from the ET wall clock at generation time; we just read its verdict.
-  if (isWeekend(dateStr)) return false;
-  if (dateStr === todayET()) return isEodReady();
-  // A historical date is complete — unless this file was generated mid-session
-  // for that date and never refreshed.
-  return sessionPhase() ? isEodReady() : true;
-}
-
 // Sizing has two inputs in the framework (docs/trading-rules.md): the day grade
 // sets a posture for the whole session, and each trade's confluence score scales
 // within it. Regime is not one of them — Step 2 gates which patterns are valid,
@@ -107,74 +82,6 @@ function effectiveSize(pattern) {
   return Number.isInteger(pct) ? `${pct}%` : `${pct.toFixed(1)}%`;
 }
 
-function eodGuardHTML(dateStr) {
-  if (isWeekend(dateStr)) {
-    return `<div style="background:#1e2330; border-left:4px solid #6b7280; padding:14px 16px; border-radius:4px; margin-bottom:16px;">
-      <strong style="color:#9ca3af;">Market Closed — Weekend</strong><br>
-      <span class="muted">No end-of-day data available for ${dateStr}. Select a weekday or check back Monday.</span>
-    </div>`;
-  }
-  const phase = sessionPhase();
-  const detail = phase === 'intraday'
-    ? `The ${dateStr} session is still open. Intraday values change until the close — end-of-day results are withheld until 4:15 PM ET so a partial day isn't shown as a final one.`
-    : `${dateStr} hasn't opened yet. The plan below is built from prior sessions and premarket only. End-of-day results appear after 4:15 PM ET.`;
-  const title = phase === 'intraday' ? 'Session In Progress' : 'Pre-Open — Plan Only';
-  return `<div style="background:#1e2330; border-left:4px solid #eab308; padding:14px 16px; border-radius:4px; margin-bottom:16px;">
-    <strong style="color:#eab308;">${title}</strong><br>
-    <span class="muted">${detail}</span>
-  </div>`;
-}
-
-// Forecast vs outcome. day_quality is the call made before the open from prior
-// sessions only; day_realized is what the session delivered. Showing both is the
-// only way to tell whether the morning model is any good — a "Choppy / Selective"
-// call on a day that ran 1.8x ATR is a miss, and it should be visible as one.
-function realizedHTML() {
-  const r = cacheData.day_realized;
-  if (!r || !r.grade) return '';
-
-  const gc = (g) => (g === 'A+' || g === 'A') ? '#10b981' : g === 'B' ? '#f59e0b' : '#ef4444';
-  const expColor = { expansion: '#10b981', normal: '#f59e0b', compression: '#ef4444' }[r.expansion] || '#6b7280';
-  const expLabel = { expansion: 'Expansion', normal: 'Normal', compression: 'Compression' }[r.expansion] || '–';
-
-  // Gap between what was forecast and what happened, in grade-score points.
-  const drift = (r.forecast_total != null && r.total != null) ? r.total - r.forecast_total : null;
-  const driftHTML = drift === null ? ''
-    : drift >= 2  ? `<span style="color:#10b981;">delivered ${drift} pts above the pre-open call</span>`
-    : drift <= -2 ? `<span style="color:#ef4444;">delivered ${Math.abs(drift)} pts below the pre-open call</span>`
-    : `<span class="muted">in line with the pre-open call</span>`;
-
-  const cell = (label, value, color) => `
-    <div>
-      <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">${label}</div>
-      <strong style="color:${color || '#e5e7eb'};">${value}</strong>
-    </div>`;
-
-  return `
-  <div style="margin-top:14px; background:#22242a; border-left:4px solid ${gc(r.grade)}; border-radius:4px; padding:12px 14px;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <strong style="color:${gc(r.grade)};">What actually happened — ${r.grade}</strong>
-      <span style="font-size:1.2em; font-weight:bold; color:${gc(r.grade)};">${r.total}/${r.max}</span>
-    </div>
-    <div style="display:flex; flex-wrap:wrap; gap:18px; margin-bottom:10px;">
-      ${cell('Range', `$${r.range?.toFixed(2)} (${r.range_pct?.toFixed(2)}%)`)}
-      ${cell('vs ATR', `${r.atr_multiple?.toFixed(2)}x`, r.atr_multiple >= 1 ? '#10b981' : '#6b7280')}
-      ${cell('Profile', expLabel, expColor)}
-      ${cell('Close in range', `${Math.round((r.close_location ?? 0) * 100)}%`)}
-      ${cell('Trend day', r.trend_day ? 'Yes' : 'No', r.trend_day ? '#10b981' : '#6b7280')}
-    </div>
-    <div style="font-size:0.9em;">${r.verdict}</div>
-    <div style="font-size:0.85em; margin-top:4px;">
-      Pre-open call: <strong style="color:${gc(r.forecast_grade)};">${r.forecast_grade} (${r.forecast_total}/8)</strong> — ${driftHTML}
-    </div>
-  </div>`;
-}
-
-function isWeekend(dateStr) {
-  const day = new Date(dateStr + 'T12:00:00').getDay();
-  return day === 0 || day === 6;
-}
-
 // Last-day candle structure: inside (compression) / outside (expansion) / normal.
 function dayTypeHTML(dayType) {
   const map = {
@@ -184,12 +91,6 @@ function dayTypeHTML(dayType) {
   };
   const d = map[dayType] || map.normal;
   return `<span style="color:${d.color}; font-weight:bold;">${d.label}</span>`;
-}
-
-function getDotsHTML(filled, total) {
-  let dots = '';
-  for (let i = 0; i < total; i++) dots += i < filled ? '●' : '○';
-  return dots;
 }
 
 function squeezeHTML(squeeze) {
@@ -203,7 +104,7 @@ function squeezeHTML(squeeze) {
 }
 
 function switchTradeTab(tab) {
-  document.querySelectorAll('#tab-morning, #tab-eod, #tab-logic').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('#tab-morning, #tab-logic').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.tab-btn[data-tab]').forEach(b => b.classList.remove('active'));
   document.getElementById(`tab-${tab}`).classList.add('active');
   document.querySelector(`.tab-btn[data-tab="${tab}"]`).classList.add('active');
@@ -216,9 +117,9 @@ window.switchTradeTab = switchTradeTab;
 const REPO_SLUG = 'jonsflow/risk-model';
 // Build a prefilled GitHub "new issue" URL. Two flavors:
 //   'logic' — propose a change to the signal logic (Logic tab)
-//   'data'  — report displayed data that looks wrong/confusing (Morning/EOD)
+//   'data'  — report displayed data that looks wrong/confusing (Morning)
 function issueUrl(kind) {
-  const d = cacheData || {};
+  const d = session ? buildView(session) : {};
   const sym = document.getElementById('symbolSelector')?.value || '—';
   const r = d.regime || {};
   const regime = r.label ? `${r.label} ${r.direction || ''} (ATR ${r.atr_trend || '—'})`.trim() : '—';
@@ -234,7 +135,7 @@ function issueUrl(kind) {
     title = '[Trade data] ';
     label = 'trade-data';
     body = ['### What looks wrong or confusing', '<!-- Which number/section, and what you expected -->', '',
-            '### Where', '<!-- Morning Setup / End of Day · which symbol -->', '', ...ctx].join('\n');
+            '### Where', '<!-- Which step or stage · which symbol -->', '', ...ctx].join('\n');
   } else {
     title = '[Trade logic] ';
     label = 'trade-logic';
@@ -286,91 +187,68 @@ async function loadLogicTab() {
 }
 
 // =============================================================================
-// STEP 0: HEADER
+// VIEW MODEL
 // =============================================================================
+// One flat view over the session file's stages, so the step renderers don't
+// each walk the file. Every field here comes from a stage that has landed:
+// premarket fields from `premarket`, the open from `open`, scored setups from
+// `opening_range`. The recap is not read on this page.
 
-// =============================================================================
-// VIEW MODELS
-// =============================================================================
-// The morning/EOD boundary used to exist only as a comment, and the comment was
-// wrong: it claimed the per-symbol indicators were written from bars prior to
-// session_date, when they come from the session's own bar. Every renderer read
-// one shared global, so nothing stopped a morning panel from displaying the
-// close — and several did.
-//
-// These two builders make the boundary structural. Morning renderers are handed
-// `buildMorningView()` and cannot reach a session field, because the object they
-// receive does not contain one. Adding a leak now requires adding a field here.
-
-function buildMorningView(c) {
+function buildView(s) {
+  const pm = s.premarket || {};
   const symbols = {};
-  for (const [sym, d] of Object.entries(c.symbols || {})) {
-    // `preopen` is the generator's pre-open copy of the daily indicators;
-    // `premarket` is the overnight bar range. Both existed before the bell.
-    // The session's own open/high/low/close deliberately do not survive.
-    symbols[sym] = { ...(d.preopen || {}), premarket: d.premarket || {}, date: d.date };
+  for (const [sym, d] of Object.entries(pm.symbols || {})) {
+    symbols[sym] = {
+      ...(d.preopen || {}),
+      premarket:  d.premarket || {},
+      gap:        d.gap || {},
+      last_print: d.last_print,
+      adr_20d:    d.adr_20d,
+      adr_8d:     d.adr_8d,
+      prev_range: d.prev_range,
+      day_type:   d.day_type,
+    };
   }
   return {
-    session_date:   c.session_date,
-    phase:          c.phase,
-    market_closed:  c.market_closed,
-    generated:      c.generated,
-    day_quality:    c.day_quality,
-    regime:         c.regime,
-    vix:            c.vix,
-    vol_regime:     c.vol_regime,
-    windows:        c.windows,
+    session_date:  s.session_date,
+    generated:     s.generated,
+    market_closed: s.market_closed,
+    premarket_window_end: pm.window_end,
+    day_quality:   pm.day_quality || {},
+    regime:        pm.regime || {},
+    structure:     pm.structure_check || {},
+    vix:           pm.vix,
+    vol_regime:    pm.vol_regime,
     symbols,
-    // `outcome` is the verdict on each setup and belongs to the EOD tab.
-    active_patterns: (c.active_patterns || []).map(({ outcome, ...rest }) => rest),
+    watchlist:     pm.watchlist || [],
+    open:          s.open || {},
+    opening_range: s.opening_range || {},
   };
 }
 
-// The EOD tab is the one view allowed to see what the session did, so it reads
-// the cache unchanged.
-function buildSessionView(c) { return c; }
+// =============================================================================
+// HEADER
+// =============================================================================
 
-function renderHeader() {
-  const gen    = new Date(cacheData.generated);
+function renderHeader(view) {
+  const gen    = new Date(view.generated);
   const genStr = gen.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
-  const grade      = cacheData.day_quality.grade;
-  const gradeColor = cacheData.market_closed ? '#6b7280'
-    : (grade === 'A+' || grade === 'A') ? '#10b981'
-    : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = cacheData.market_closed ? 'Market Closed'
-    : grade === 'A+' ? 'Strong'
-    : grade === 'A'  ? 'Favorable'
-    : grade === 'B'  ? 'Selective' : 'Sit Out';
+  const grade = view.day_quality.grade;
+  const color = view.market_closed ? '#6b7280' : gradeColor(grade);
+  const label = view.market_closed ? 'Market Closed' : gradeLabel(grade);
 
-  document.getElementById('headerMeta').textContent = `as of ${genStr}`;
+  document.getElementById('headerMeta').textContent = `${view.session_date} · as of ${genStr}`;
   document.getElementById('dayQualityBadge').innerHTML =
-    `<span style="background: ${gradeColor}; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">${cacheData.market_closed ? 'Weekend' : grade} — ${gradeLabel}</span>`;
+    `<span style="background: ${color}; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">${view.market_closed ? 'Weekend' : grade} — ${label}</span>`;
 
-  const w = cacheData.windows || {};
-  const fmtWindow = (win) => {
-    if (!win?.from) return null;
-    return win.from === win.to ? `${win.from} ET` : `${win.from}–${win.to} ET`;
-  };
-
-  const pmLabel   = fmtWindow(w.premarket);
-  const orbLabel  = fmtWindow(w.opening_range);
-  const sessLabel = fmtWindow(w.session);
-  const lhLabel   = fmtWindow(w.last_hour);
-
-  const morningParts = [
-    pmLabel  && `Pre-market ${pmLabel}`,
-    orbLabel && `Opening range ${orbLabel}`,
-    'Regime & quality from daily close',
-  ].filter(Boolean);
-  const eodParts = [
-    lhLabel   && `Last hour ${lhLabel}`,
-    sessLabel && `VWAP from session ${sessLabel}`,
-    'Outcomes from daily OHLCV',
-  ].filter(Boolean);
-
-  document.getElementById('morningWindowLabel').textContent = morningParts.join(' · ');
-  document.getElementById('eodWindowLabel').textContent     = eodParts.join(' · ');
+  const stage = (name, windowEnd, landed) =>
+    `${name} ${windowEnd ? `to ${windowEnd} ET` : ''} ${landed ? '✓' : '· not available'}`;
+  document.getElementById('morningWindowLabel').textContent = [
+    stage('Premarket', view.premarket_window_end, true),
+    stage('Open', view.open.window_end, hasStage(session, 'open')),
+    stage('Opening range', view.opening_range.window_end, hasStage(session, 'opening_range')),
+  ].join('  ·  ');
 }
 
 // =============================================================================
@@ -409,7 +287,10 @@ function renderDayQuality(view) {
   const gapRange  = scores.gap_range  || {};
   const struc     = scores.structure  || {};
   const adrScore  = scores.adr        || {};
-  const alignScore = scores.alignment || {};
+  // Alignment is scored at the end of the opening range; until then the grade
+  // holds it at the neutral 1 the generator stamps.
+  const alignment  = view.opening_range.alignment || null;
+  const alignScore = alignment || scores.alignment || {};
 
   const noDataMsg = '<span class="muted" style="font-size:0.8em;">No pre-market data</span>';
   const fmtVal = (n, suffix = '') => n != null ? n + suffix : '–';
@@ -420,7 +301,7 @@ function renderDayQuality(view) {
   const spyD  = view.symbols['SPY'] || {};
   const pmD   = spyD.premarket || {};
   const prX   = gapRange.prior_close;
-  const eoX   = gapRange.est_open;
+  const eoX   = gapRange.last_print;
   const pmH   = pmD.high;
   const pmL   = pmD.low;
   const lastPx = spyD.close;
@@ -442,7 +323,7 @@ function renderDayQuality(view) {
     if (eoX != null) {
       ps += `
       <div>
-        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">RTH Open</div>
+        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">Last Print${view.premarket_window_end ? ` (${view.premarket_window_end})` : ''}</div>
         <strong style="color:${gc};">$${eoX.toFixed(2)}</strong>
       </div>`;
       if (gapDol !== null) {
@@ -502,9 +383,7 @@ function renderDayQuality(view) {
       <span class="muted">VIX:</span>
       <strong style="color:${vixColor};">${vix.current}</strong>
       <span class="muted" style="font-size:0.8em;">${vix.ratio}× 20d avg (${vix.avg_20d}) — ${vixLabel}</span>
-      ${vix.as_of && vix.as_of !== view.session_date
-        ? `<span class="muted" style="font-size:0.75em;">close of ${vix.as_of}</span>`
-        : ''}
+      ${vix.as_of ? `<span class="muted" style="font-size:0.75em;">as of ${vix.as_of}</span>` : ''}
     </div>`;
   }
 
@@ -551,14 +430,16 @@ function renderDayQuality(view) {
 
     <div class="pill">
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-        <div class="muted">Index Alignment <span style="font-size:0.85em;">(today's session)</span></div>
+        <div class="muted">Index Alignment <span style="font-size:0.85em;">(opening range)</span></div>
         <span>${scoreDots(alignScore.score ?? 0)}</span>
       </div>
       <span style="font-weight:bold; color:${scoreColor(alignScore.score ?? 0)}; font-size:1.1em;">
-        ${alignScore.score === 2 ? 'Aligned' : alignScore.score === 1 ? 'Partial' : 'Diverging'}
+        ${!alignment ? 'Not available' : alignScore.score === 2 ? 'Aligned' : alignScore.score === 1 ? 'Partial' : 'Diverging'}
       </span>
       <div class="muted" style="font-size:0.8em; margin-top:4px;">
-        ${Object.entries(alignScore.detail || {}).map(([s, d]) => `${s} ${d === 'up' ? '▲' : d === 'down' ? '▼' : '→'}`).join(' · ') || 'SPY · QQQ · IWM'}
+        ${alignment
+          ? Object.entries(alignment.detail || {}).map(([s, d]) => `${s} ${d === 'up' ? '▲' : d === 'down' ? '▼' : '→'}`).join(' · ')
+          : `Neutral in the grade until ${view.opening_range.window_end || 'the opening range'}`}
       </div>
     </div>
 
@@ -631,10 +512,13 @@ function renderRegime(view) {
         <strong>${regime.atr_trend}</strong>
       </div>
       <div class="pill">
-        <div class="muted">Index Alignment</div>
-        <span style="color: ${regime.index_alignment === 'aligned' ? '#10b981' : '#ef4444'};">
-          ${regime.index_alignment}
+        <div class="muted">Hourly Structure</div>
+        <span style="color: ${view.structure.contradicts ? '#ef4444' : '#10b981'};">
+          ${view.structure.hourly ?? '–'}
         </span>
+        ${view.structure.contradicts
+          ? `<div style="color:#ef4444; font-size:0.8em; margin-top:4px;">Contradicts daily ${view.structure.daily_direction}</div>`
+          : ''}
       </div>
       <div class="pill">
         <div class="muted">Last Day</div>
@@ -655,7 +539,7 @@ function renderRegime(view) {
 // =============================================================================
 
 function renderPatternScanner(view) {
-  const patterns = view.active_patterns;
+  const patterns = view.watchlist;
   const regime   = view.regime.label;
   const data     = view.symbols[selectedSymbol];
 
@@ -666,10 +550,14 @@ function renderPatternScanner(view) {
 
   if (symPatterns.length === 0) {
     const reasons = [];
-    if (!data.gap_significant && !data.outside_day && !(data.patterns && data.patterns.orb_qualified))
-      reasons.push('No pattern detected');
+    if (!data) {
+      document.getElementById('step3Content').innerHTML =
+        `<div class="muted" style="padding: 12px;">No premarket data for ${selectedSymbol}.</div>`;
+      return;
+    }
+    if (!data.gap?.gap_significant) reasons.push('No significant gap');
     if (data.rsi_14 > 35 && data.rsi_14 < 65) reasons.push('RSI neutral');
-    if (!data.atr_above_avg)                   reasons.push('PM range below avg');
+    if (!data.pm_range_active)                 reasons.push('PM range below avg');
     if (data.above_ma_20 === false)             reasons.push('Below 20-MA');
 
     document.getElementById('step3Content').innerHTML = `
@@ -717,7 +605,12 @@ function renderPatternScanner(view) {
 // =============================================================================
 
 function scoreConfluences(view) {
-  const patterns = view.active_patterns;
+  if (!hasStage(session, 'opening_range')) {
+    document.getElementById('step4Content').innerHTML =
+      `<div class="muted">${stageMessage(session, 'opening_range')}</div>`;
+    return [];
+  }
+  const patterns = view.opening_range.patterns || [];
 
   // The score is computed and stamped by the generator from pre-open inputs
   // only, so it is a fact about that morning rather than something re-derived
@@ -732,15 +625,14 @@ function scoreConfluences(view) {
       const sym      = p.symbol;
       const data     = view.symbols[sym];
       const squeeze  = data.squeeze        || { status: 'unknown', momentum: 0, momentum_increasing: false };
-      const vwap     = data.vwap           || { vwap: null, above_vwap: null, distance_pct: null };
       const rsiDiv   = data.rsi_divergence || { signal: 'unknown' };
 
       const { score, max, checks } = p.confluence;
-      const tradeDay = new Date(view.generated).getDay();
+      const tradeDay = new Date(view.session_date + 'T12:00:00').getDay();
       const weekdayEdge = [2, 3, 4].includes(tradeDay);
       return { symbol: sym, pattern: p.pattern, direction: p.direction, levels: p.levels,
                sizing: p.sizing, plan: p.plan, qualifies: p.qualifies,
-               score, max, checks, data, squeeze, vwap, rsiDiv, weekdayEdge };
+               score, max, checks, data, squeeze, rsiDiv, weekdayEdge };
     })
     .sort((a, b) => b.score - a.score)
     // `qualifies` is the generator's verdict, from sizing.min_confluence.
@@ -801,6 +693,11 @@ function scoreConfluences(view) {
 // =============================================================================
 
 function renderRecommendations(view, scored) {
+  if (!hasStage(session, 'opening_range')) {
+    document.getElementById('step5Content').innerHTML =
+      `<div class="muted">${stageMessage(session, 'opening_range')}</div>`;
+    return;
+  }
   let html = lowProbabilityHTML(view);
 
   if (scored.length === 0) {
@@ -849,7 +746,7 @@ function renderRecommendations(view, scored) {
         target2 = `${dir}$${atrT2} from entry (${mT2}x ATR)`;
         target3 = `Trailing $${atrSt} (${mSt}x ATR)`;
       } else if (pat === 'ORB') {
-        entry   = `ORB in play — watch for breakout 10:00–11:30 AM`;
+        entry   = `Close above $${lv.or_high} or below $${lv.or_low} — breakout window to 11:30 AM`;
         stop    = `Opposite side of opening range`;
         target1 = `$${atrT1} from entry (${mT1}x ATR)`;
         target2 = `$${atrT2} from entry (${mT2}x ATR)`;
@@ -943,436 +840,123 @@ function renderRecommendations(view, scored) {
 }
 
 // =============================================================================
-// EOD TAB
+// OPEN AND OPENING RANGE
 // =============================================================================
 
-function renderEodOutcomes(scored) {
-  const el = document.getElementById('eodContent');
-  if (!el) return;
-
-  // Guard: this tab describes the finished session, so it stays empty until the
-  // session is complete — per the cache phase contract. isMarketOpenForDate only
-  // answers whether the date trades at all, which is true all through a live
-  // session, so completeness has to be checked too.
-  if ((viewingDate && !isMarketOpenForDate(viewingDate)) || !isEodReady()) {
-    el.innerHTML = eodGuardHTML(viewingDate || todayET());
+function renderOpen(view) {
+  const el = document.getElementById('openContent');
+  const o  = view.open.symbols?.[selectedSymbol];
+  if (!hasStage(session, 'open')) {
+    el.innerHTML = `<div class="muted">${stageMessage(session, 'open')}</div>`;
     return;
   }
-
-  const sec = (title, body) => `
-    <div style="margin-bottom: 24px;">
-      <h3 style="margin: 0 0 12px 0; color: #94a3b8; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid #2a2a3e; padding-bottom: 6px;">${title}</h3>
-      ${body}
-    </div>`;
-
-  const pill = (label, value, color, note) => `
-    <div class="pill" style="min-width: 0;">
-      <div class="muted" style="font-size:0.8em;">${label}</div>
-      <span style="font-weight: bold; color: ${color};">${value}</span>
-      ${note ? `<div class="muted" style="font-size:0.75em; margin-top:4px;">${note}</div>` : ''}
-    </div>`;
-
-  let html = '';
-
-  // Section 1: Day Quality + SPY close
-  const grade      = cacheData.day_quality.grade;
-  const scores     = cacheData.day_quality.scores || {};
-  const gradeColor = (grade === 'A+' || grade === 'A') ? '#10b981' : grade === 'B' ? '#f59e0b' : '#ef4444';
-  const gradeLabel = grade === 'A+' ? 'Strong' : grade === 'A' ? 'Favorable' : grade === 'B' ? 'Selective' : 'Sit Out';
-  const scoreColor = (s) => s === 2 ? '#10b981' : s === 1 ? '#f59e0b' : '#ef4444';
-
-  const eodSpyClose  = cacheData.symbols?.['SPY']?.close;
-  const eodPrevClose = scores.gap_range?.prior_close;
-  const eodChangeDol = (eodSpyClose != null && eodPrevClose != null) ? +(eodSpyClose - eodPrevClose).toFixed(2) : null;
-  const eodChangePct = (eodChangeDol != null && eodPrevClose) ? +(eodChangeDol / eodPrevClose * 100).toFixed(2) : null;
-  const eodColor     = eodChangeDol == null || eodChangeDol === 0 ? '#6b7280' : eodChangeDol > 0 ? '#10b981' : '#ef4444';
-  const eodSign      = eodChangeDol != null && eodChangeDol >= 0 ? '+' : '';
-
-  let spyCloseRow = '';
-  if (eodSpyClose != null) {
-    spyCloseRow = `<div style="display:flex; align-items:center; gap:16px; margin-bottom:12px; background:#22242a; border-radius:6px; padding:10px 14px;">
-      <div>
-        <div class="muted" style="font-size:0.72em; text-transform:uppercase; letter-spacing:0.05em; margin-bottom:2px;">SPY Close</div>
-        <strong style="font-size:1.3em;">$${eodSpyClose.toFixed(2)}</strong>
-      </div>
-      ${eodChangeDol !== null ? `<span style="background:${eodColor}18; border:1px solid ${eodColor}55; color:${eodColor}; padding:4px 10px; border-radius:4px; font-weight:bold; font-size:0.88em;">
-        ${eodChangeDol > 0 ? '↑' : eodChangeDol < 0 ? '↓' : '→'} ${eodSign}$${Math.abs(eodChangeDol).toFixed(2)} (${eodSign}${eodChangePct?.toFixed(2)}%) vs prev close
-      </span>` : ''}
-    </div>`;
+  if (!o) {
+    el.innerHTML = `<div class="muted">No opening bar for ${selectedSymbol}.</div>`;
+    return;
   }
-
-  let dqBody = spyCloseRow + `<div class="metric-grid">
-    ${pill('Day Grade',   `${grade} (${scores.total ?? '–'}/${scores.max ?? 8})`, gradeColor, gradeLabel)}
-    ${pill('Gap+PM Range', scores.gap_range?.score != null ? `${scores.gap_range.score}/2` : '–', scoreColor(scores.gap_range?.score ?? 0), null)}
-    ${pill('Structure',   scores.structure?.regime ?? '–', scoreColor(scores.structure?.score ?? 0), null)}
-    ${pill('Alignment',   scores.alignment?.score === 2 ? 'Aligned' : scores.alignment?.score === 1 ? 'Partial' : 'Diverging', scoreColor(scores.alignment?.score ?? 0), null)}
-  </div>`;
-  if (['C', 'F'].includes(grade)) {
-    dqBody += `<div style="margin-top:10px; color:#ef4444; font-size:0.9em;">Low probability day — below the quality threshold for active trading.</div>`;
-  }
-  dqBody += realizedHTML();
-  html += sec('1 — Day Quality', dqBody);
-
-  // Section 2: Market Regime
-  const regime       = cacheData.regime;
-  const regimeColors = { 'Trending': '#3b82f6', 'Ranging': '#f59e0b', 'Choppy': '#ef4444' };
-  const rCol = regimeColors[regime.label] || '#6b7280';
-  html += sec('2 — Market Regime', `
-    <div class="metric-grid" style="margin-bottom:10px;">
-      ${pill('Regime', regime.label, rCol, null)}
-      ${pill('Direction', regime.direction, '#e2e8f0', null)}
-      ${pill('ATR Trend', regime.atr_trend, '#e2e8f0', null)}
+  const g   = o.gap || {};
+  const gc  = g.gap_type === 'up' ? '#10b981' : g.gap_type === 'down' ? '#ef4444' : '#6b7280';
+  const lean = { toward_fill: 'Toward the fill', with_gap: 'With the gap', flat: 'Flat' }[o.first_bar] || 'No gap';
+  el.innerHTML = `
+    <div class="metric-grid">
+      <div class="pill"><div class="muted">First bar (${o.bar.time})</div>
+        <strong>O ${o.bar.open} · H ${o.bar.high} · L ${o.bar.low} · C ${o.bar.close}</strong></div>
+      <div class="pill"><div class="muted">Gap vs prior close ($${o.prior_close})</div>
+        <strong style="color:${gc};">${g.gap_pct != null ? `${g.gap_pct > 0 ? '+' : ''}${g.gap_pct}%` : '–'}</strong>
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">${g.gap_ratio != null ? `${g.gap_ratio}× median gap` : ''}</div></div>
+      <div class="pill"><div class="muted">First bar leans</div><strong>${lean}</strong>
+        ${o.filled_in_first_bar ? '<div style="color:#10b981; font-size:0.8em; margin-top:4px;">Filled in the first bar</div>' : ''}</div>
     </div>
-    <div class="muted" style="font-size:0.85em;">Favoured patterns today: <strong style="color:#e2e8f0;">${favoredLabel(regime)}</strong></div>`);
+    <div class="muted" style="font-size:0.8em; margin-top:8px;">Recorded for later assessment — no targets.</div>`;
+}
 
-  // Section 3: Pattern Outcomes
-  const patterns = cacheData.active_patterns.filter(p => p.symbol === selectedSymbol);
-  if (patterns.length === 0) {
-    html += sec('3 — Pattern Outcomes', `<div class="muted">No patterns detected for ${selectedSymbol} today.</div>`);
-  } else {
-    const patternCards = patterns.map(p => {
-      const oc       = p.outcome || {};
-      const lv       = p.levels  || {};
-      const dirArrow = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
-      const dirColor = p.direction === 'up' ? '#10b981' : p.direction === 'down' ? '#ef4444' : '#94a3b8';
-
-      let outcomeLabel, outcomeColor;
-      const hasOrbLevels = lv.orb_high != null;
-      const hasGapFields = lv.fill_target != null || lv.t2_continuation != null || 'filled' in oc;
-      if (oc.no_trade) {
-        outcomeLabel = `No trade — ${oc.reason || 'setup did not qualify'}`;
-        outcomeColor = '#6b7280';
-      } else if (oc.next_day) {
-        outcomeLabel = 'Next session'; outcomeColor = '#f59e0b';
-      } else if (p.pattern.includes('ORB') && hasOrbLevels) {
-        if (oc.hit_t1)        { outcomeLabel = '✓ T1 Hit'; outcomeColor = '#10b981'; }
-        else if (oc.breached) { outcomeLabel = 'Breached';  outcomeColor = '#f59e0b'; }
-        else                  { outcomeLabel = 'No breach'; outcomeColor = '#6b7280'; }
-      } else if (p.pattern.includes('Gap') && hasGapFields) {
-        const isContinuation = p.pattern.includes('Continuation');
-        if (isContinuation) {
-          if (oc.hit_t2_continuation)      { outcomeLabel = '✓ T2 Hit'; outcomeColor = '#10b981'; }
-          else if (oc.hit_t1_continuation) { outcomeLabel = '✓ T1 Hit'; outcomeColor = '#10b981'; }
-          else if (oc.filled)              { outcomeLabel = 'Filled (thesis broke)'; outcomeColor = '#ef4444'; }
-          else                             { outcomeLabel = 'Held, no target'; outcomeColor = '#f59e0b'; }
-        } else {
-          outcomeLabel = oc.filled ? '✓ Filled' : 'Not filled';
-          outcomeColor = oc.filled ? '#10b981' : '#f59e0b';
-        }
-      } else {
-        outcomeLabel = '—'; outcomeColor = '#6b7280';
-      }
-
-      let levelsInner = '';
-      if (lv.orb_high != null) {
-        levelsInner = `
-          <div><strong>Range:</strong> $${lv.orb_low} – $${lv.orb_high}</div>
-          <div><strong>T1↑:</strong> $${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓:</strong> $${lv.t1_down}</div>
-          <div><strong>T2↑:</strong> $${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓:</strong> $${lv.t2_down}</div>`;
-        if (lv.fill_target != null) {
-          levelsInner += `<div><strong>Gap fill:</strong> $${lv.fill_target}</div>`;
-        }
-      } else if (lv.fill_target != null) {
-        levelsInner = `
-          <div><strong>Fill target:</strong> $${lv.fill_target}</div>`;
-      } else if (lv.t2_continuation != null) {
-        levelsInner = `
-          <div><strong>Open:</strong> $${lv.today_open}</div>
-          <div><strong>Cont. T1:</strong> $${lv.t1_continuation} &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2_continuation}</div>`;
-      } else if (typeof lv.entry === 'number') {
-        levelsInner = `
-          <div><strong>Entry:</strong> $${lv.entry}</div>
-          <div><strong>Stop:</strong> $${lv.stop}</div>
-          <div><strong>T1:</strong> $${lv.t1}${lv.t2 ? ` &nbsp;|&nbsp; <strong>T2:</strong> $${lv.t2}` : ''}</div>`;
-      }
-
-      return `
-        <div class="trade-card" style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <div>
-              <strong style="font-size: 1.1em;">${p.symbol}</strong>
-              <span style="margin-left: 8px; background: ${dirColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
-                ${p.pattern} ${dirArrow}
-              </span>
-            </div>
-            <span style="color: ${outcomeColor}; font-weight: bold; font-size: 0.85em;">${outcomeLabel}</span>
-          </div>
-          <div class="muted" style="font-size: 0.8em; margin-bottom: 8px;">${p.notes}</div>
-          ${levelsInner ? `<div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em;">${levelsInner}</div>` : ''}
-        </div>`;
-    }).join('');
-    html += sec('3 — Pattern Outcomes', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${patternCards}</div>`);
+function renderOpeningRange(view) {
+  const el = document.getElementById('orContent');
+  const or = view.opening_range;
+  if (!hasStage(session, 'opening_range')) {
+    el.innerHTML = `<div class="muted">${stageMessage(session, 'opening_range')}</div>`;
+    return;
   }
-
-  // Section 4: Confluence Review
-  if (!scored || scored.length === 0) {
-    html += sec('4 — Confluence Review', '<div class="muted">No trades met confluence threshold (3+).</div>');
-  } else {
-    const confCards = scored.map(trade => {
-      const sc      = trade.score >= 6 ? '#10b981' : trade.score >= 4 ? '#f59e0b' : '#3b82f6';
-      const szLabel = trade.sizing?.tier_label || '—';
-      const checksHTML = Object.entries(trade.checks).map(([k, v]) =>
-        `<div style="color:${v ? '#10b981' : '#4b5563'}; font-size:0.8em;">${v ? '✓' : '✗'} ${k}</div>`
-      ).join('');
-      return `
-        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <div>
-              <strong style="font-size: 1.1em;">${trade.symbol}</strong>
-              <span style="margin-left: 8px; background: ${sc}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
-                ${trade.pattern} ${trade.direction === 'up' ? '▲' : trade.direction === 'down' ? '▼' : '—'}
-              </span>
-            </div>
-            <span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${trade.score}/8 ${getDotsHTML(trade.score, 8)}</span>
-          </div>
-          <div style="font-size: 0.8em; font-weight: bold; color: ${sc}; margin-bottom: 8px;">${szLabel}</div>
-          <div style="font-size: 0.8em;">${checksHTML}</div>
-          <div style="margin-top: 8px; font-size: 0.8em;">Squeeze: ${squeezeHTML(trade.squeeze)}</div>
-        </div>`;
-    }).join('');
-    html += sec('4 — Confluence Review', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${confCards}</div>`);
-  }
-
-  // Section 5: Trade Levels & Outcomes
-  const tradablePatterns = patterns.filter(p => p.levels && Object.keys(p.levels).length > 0);
-  if (tradablePatterns.length === 0) {
-    html += sec('5 — Trade Levels & Outcomes', '<div class="muted">No level data available.</div>');
-  } else {
-    const tradeCards = tradablePatterns.map(p => {
-      const lv          = p.levels;
-      const oc          = p.outcome || {};
-      const d           = cacheData.symbols[p.symbol];
-      const eod         = d.eod_outcome || {};
-      const isNextDay   = oc.next_day;
-      const scoredEntry = scored ? scored.find(s => s.symbol === p.symbol && s.pattern === p.pattern) : null;
-      const score       = scoredEntry ? scoredEntry.score : 0;
-      const sc          = score >= 6 ? '#10b981' : score >= 4 ? '#f59e0b' : score >= 2 ? '#3b82f6' : '#6b7280';
-      const dirArrow    = p.direction === 'up' ? '▲' : p.direction === 'down' ? '▼' : '—';
-
-      let levelsInner = '';
-      const row = (label, value, tail) =>
-        `<div style="display:flex; justify-content:space-between;"><span>${label} ${value}</span>${tail}</div>`;
-
-      if (lv.orb_high != null) {
-        const bColor  = oc.breached ? (oc.direction === 'up' ? '#10b981' : '#ef4444') : '#6b7280';
-        const t1Color = oc.hit_t1 ? '#10b981' : oc.breached ? '#f59e0b' : '#6b7280';
-        const breachTail = `<span style="color:${bColor};">${oc.breached ? (oc.direction === 'up' ? '▲ Broke up' : '▼ Broke down') : 'No breach'}</span>`;
-        const t1Tail     = `<span style="color:${t1Color};">${oc.hit_t1 ? '✓ Hit' : '—'}</span>`;
-        levelsInner =
-          row('<strong>Range:</strong>', `$${lv.orb_low} – $${lv.orb_high}`, breachTail) +
-          row('<strong>T1↑</strong>',    `$${lv.t1_up} &nbsp;/&nbsp; <strong>T1↓</strong> $${lv.t1_down}`, t1Tail) +
-          row('<strong>T2↑</strong>',    `$${lv.t2_up} &nbsp;/&nbsp; <strong>T2↓</strong> $${lv.t2_down}`, '<span class="muted">—</span>');
-        if (lv.fill_target != null) {
-          const fillColor = oc.filled ? '#10b981' : '#6b7280';
-          const fillTail  = `<span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span>`;
-          levelsInner += row('<strong>Gap fill:</strong>', `$${lv.fill_target}`, fillTail);
-        } else if (lv.t2_continuation != null) {
-          const t1cTail = oc.hit_t1_continuation ? '<span style="color:#10b981;">✓ Hit</span>' : '<span class="muted">—</span>';
-          const t2cTail = oc.hit_t2_continuation ? '<span style="color:#10b981;">✓ Hit</span>' : '<span class="muted">—</span>';
-          levelsInner += row('<strong>Cont. T1:</strong>', `$${lv.t1_continuation}`, t1cTail);
-          levelsInner += row('<strong>Cont. T2:</strong>', `$${lv.t2_continuation}`, t2cTail);
-        }
-      } else if (lv.fill_target != null) {
-        const fillColor = oc.filled ? '#10b981' : '#6b7280';
-        const fillTail  = `<span style="color:${fillColor};">${oc.filled ? '✓ Filled' : 'Not filled'}</span>`;
-        levelsInner = row('<strong>Fill target:</strong>', `$${lv.fill_target}`, fillTail);
-      } else if (lv.t2_continuation != null) {
-        const t1Tail = oc.hit_t1_continuation
-          ? '<span style="color:#10b981;">✓ Hit</span>'
-          : (oc.filled ? '<span style="color:#ef4444;">Missed</span>' : '<span class="muted">—</span>');
-        const t2Tail = oc.hit_t2_continuation
-          ? '<span style="color:#10b981;">✓ Hit</span>'
-          : (oc.filled ? '<span style="color:#ef4444;">Missed</span>' : '<span class="muted">—</span>');
-        const filledTail = oc.filled
-          ? '<span style="color:#ef4444;">Filled (thesis broke)</span>'
-          : '<span style="color:#10b981;">✓ Held</span>';
-        levelsInner =
-          row('<strong>Open:</strong>',     `$${lv.today_open}`, filledTail) +
-          row('<strong>Cont. T1:</strong>', `$${lv.t1_continuation}`, t1Tail) +
-          row('<strong>Cont. T2:</strong>', `$${lv.t2_continuation}`, t2Tail);
-      } else if (typeof lv.entry === 'number') {
-        levelsInner =
-          row('<strong>Entry:</strong>',       `$${lv.entry}`, `<span style="color:#f59e0b;">${isNextDay ? 'Next session' : '—'}</span>`) +
-          row('<strong>Stop:</strong>',        `$${lv.stop}`,  '<span class="muted">—</span>') +
-          row('<strong>T1 (1.5×):</strong>',   `$${lv.t1}`,    '<span class="muted">—</span>') +
-          (lv.t2 ? row('<strong>T2 (2×):</strong>', `$${lv.t2}`, '<span class="muted">—</span>') : '');
-      }
-
-      return `
-        <div class="trade-card" style="border: 2px solid ${sc}; border-radius: 6px; padding: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div>
-              <strong style="font-size: 1.1em;">${p.symbol}</strong>
-              <span style="margin-left: 8px; background: ${sc}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
-                ${p.pattern} ${dirArrow}
-              </span>
-            </div>
-            ${score > 0 ? `<span style="font-weight: bold; color: ${sc}; font-size: 0.85em;">${score}/8 ${getDotsHTML(score, 8)}</span>` : ''}
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px; font-size: 0.85em;">
-            <div><div class="muted">Close</div><strong>$${d.close}</strong></div>
-            <div><div class="muted">ATR (14)</div><strong>${d.atr_14}</strong></div>
-          </div>
-          <div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em; margin-bottom: 10px;">
-            ${levelsInner}
-          </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 0.8em;">
-            <div style="background: #22242a; padding: 8px; border-radius: 8px;">
-              <div class="muted">Day Range</div>
-              <strong>$${eod.day_range}</strong>
-            </div>
-            <div style="background: #22242a; padding: 8px; border-radius: 8px;">
-              <div class="muted">ATR Multiple</div>
-              <strong>${eod.day_atr_multiple}×</strong>
-            </div>
-          </div>
-        </div>`;
-    }).join('');
-    html += sec('5 — Trade Levels & Outcomes', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${tradeCards}</div>`);
-  }
-
-  // Section 6: Prior Session Setups — resolves the previous bar's next-session
-  // patterns (Engulfing, Outside Day) against today's high/low.
-  const priorEntries = Object.entries(cacheData.symbols || {})
-    .flatMap(([sym, sd]) => (sd.prior_setups || []).map(r => ({ symbol: sym, ...r })))
-    .filter(r => r.symbol === selectedSymbol);
-
-  if (priorEntries.length === 0) {
-    html += sec('6 — Prior Session Setups', `<div class="muted">No next-day setup fired on ${selectedSymbol}'s prior bar.</div>`);
-  } else {
-    const priorCards = priorEntries.map(r => {
-      const dirArrow = r.direction === 'up' ? '▲' : '▼';
-      const dirColor = r.direction === 'up' ? '#10b981' : '#ef4444';
-
-      let label, color;
-      if (!r.triggered)     { label = 'Not triggered';   color = '#6b7280'; }
-      else if (r.hit_t2)    { label = '✓ T2 Hit';        color = '#10b981'; }
-      else if (r.hit_t1)    { label = '✓ T1 Hit';        color = '#10b981'; }
-      else if (r.stop_hit)  { label = '✗ Stopped';       color = '#ef4444'; }
-      else                  { label = 'Triggered, open'; color = '#f59e0b'; }
-
-      const row = (lbl, val, tail) =>
-        `<div style="display:flex; justify-content:space-between;"><span><strong>${lbl}:</strong> ${val}</span>${tail}</div>`;
-      const check = (cond, hit) => cond
-        ? `<span style="color:${hit ? '#10b981' : '#ef4444'};">${hit ? '✓ Hit' : '✗ Hit'}</span>`
-        : '<span class="muted">—</span>';
-
-      const rowsInner =
-        row('Entry', `$${r.entry}`, `<span style="color:${r.triggered ? '#10b981' : '#6b7280'};">${r.triggered ? '✓ Triggered' : 'Not reached'}</span>`) +
-        row('Stop',  `$${r.stop}`,  check(r.triggered, r.stop_hit)) +
-        row('T1',    `$${r.t1}`,    check(r.triggered, r.hit_t1)) +
-        (r.t2 != null ? row('T2', `$${r.t2}`, check(r.triggered, r.hit_t2)) : '');
-
-      return `
-        <div class="trade-card" style="border: 2px solid ${dirColor}; border-radius: 6px; padding: 14px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <div>
-              <strong style="font-size: 1.1em;">${r.symbol}</strong>
-              <span style="margin-left: 8px; background: ${dirColor}; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.8em;">
-                ${r.pattern} ${dirArrow}
-              </span>
-            </div>
-            <span style="font-weight: bold; color: ${color}; font-size: 0.85em;">${label}</span>
-          </div>
-          <div style="background: #22242a; padding: 8px; border-radius: 4px; font-size: 0.85em;">${rowsInner}</div>
-        </div>`;
-    }).join('');
-    html += sec('6 — Prior Session Setups', `<div style="display: flex; flex-wrap: wrap; gap: 12px;">${priorCards}</div>`);
-  }
-
-  el.innerHTML = html;
+  const r  = or.symbols?.[selectedSymbol];
+  const al = or.alignment || {};
+  const alColor = al.score === 2 ? '#10b981' : al.score === 1 ? '#f59e0b' : '#ef4444';
+  const alDetail = Object.entries(al.detail || {})
+    .map(([s, d]) => `${s} ${d === 'up' ? '▲' : d === 'down' ? '▼' : '→'}`).join(' · ');
+  el.innerHTML = `
+    <div class="metric-grid">
+      <div class="pill"><div class="muted">Range (09:30–${or.window_end})</div>
+        <strong>${r ? `$${r.low} – $${r.high}` : '–'}</strong>
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">${r ? `$${r.range} wide` : `No bars for ${selectedSymbol}`}</div></div>
+      <div class="pill"><div class="muted">ORB</div>
+        <strong style="color:${r?.qualified ? '#10b981' : '#6b7280'};">${r ? (r.qualified ? 'Qualified' : 'Not qualified') : '–'}</strong>
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">Range &gt; 0.75× ATR avg</div></div>
+      <div class="pill"><div class="muted">Targets</div>
+        <strong style="font-size:0.9em;">${r ? `▲ $${r.levels.t1_up} / $${r.levels.t2_up}` : '–'}</strong>
+        <div style="font-size:0.9em;"><strong>${r ? `▼ $${r.levels.t1_down} / $${r.levels.t2_down}` : ''}</strong></div></div>
+      <div class="pill"><div class="muted">Index Alignment</div>
+        <strong style="color:${alColor};">${al.label || '–'}</strong>
+        <div class="muted" style="font-size:0.8em; margin-top:4px;">${alDetail}</div></div>
+    </div>`;
 }
 
 // =============================================================================
 // MAIN RENDER ORCHESTRATION
 // =============================================================================
 
-function renderAll() {
-  ['step-2','step-3','step-4','step-5'].forEach(id => {
-    document.getElementById(id).style.display = '';
-  });
+const STEP_IDS = ['step-2', 'step-3', 'step-open', 'step-or', 'step-4', 'step-5'];
 
-  // Built once per render. Morning renderers get `morning` and can only see
-  // pre-open fields; the EOD tab reads the full cache directly.
-  const morning = buildMorningView(cacheData);
-
-  renderHeader();
-  renderDayQuality(morning);
-
-  if (cacheData.market_closed) {
-    ['step-2','step-3','step-4','step-5'].forEach(id => {
-      document.getElementById(id).style.display = 'none';
-    });
-    // Clear EOD tab
-    const eodEl = document.getElementById('eodContent');
-    if (eodEl) eodEl.innerHTML = eodGuardHTML(viewingDate || todayET());
-    return;
-  }
-
-  // Steps 2-6 read regime, active_patterns and the per-symbol indicators, all of
-  // which the generator writes in every phase from bars prior to session_date.
-  // None of them reads eod_outcome — only the EOD tab does, and it guards itself.
-  // So they render whatever the phase, and the plan is available pre-open.
-  if (!isEodReady()) {
-    document.getElementById('step1Content').insertAdjacentHTML('beforeend',
-      `<div class="muted" style="margin-top:12px; font-size:0.85em;">
-        ${sessionPhase() === 'intraday'
-          ? 'Session in progress — the plan below is built from prior sessions and premarket. Outcomes appear after the post-close report.'
-          : "Pre-open — the plan below is built from prior sessions and premarket. Outcomes appear after the post-close report."}
-      </div>`);
-  }
-
-  renderRegime(morning);
-  renderPatternScanner(morning);
-  const scored = scoreConfluences(morning);
-  scoredTrades = scored;
-  renderRecommendations(morning, scored);
-  renderEodOutcomes(scored);
+function showSteps(visible) {
+  STEP_IDS.forEach(id => { document.getElementById(id).style.display = visible ? '' : 'none'; });
 }
 
-function renderWeekend(dateStr) {
-  viewingDate = dateStr;
-  ['step-2','step-3','step-4','step-5'].forEach(id =>
-    document.getElementById(id).style.display = 'none');
+function renderAll() {
+  const view = buildView(session);
+  showSteps(!view.market_closed);
+  renderHeader(view);
+  renderDayQuality(view);
+  if (view.market_closed) return;
+
+  renderRegime(view);
+  renderPatternScanner(view);
+  renderOpen(view);
+  renderOpeningRange(view);
+  const scored = scoreConfluences(view);
+  renderRecommendations(view, scored);
+}
+
+function renderEmpty(dateStr, title, detail) {
+  session = null;
+  showSteps(false);
   document.getElementById('headerMeta').textContent = dateStr;
-  document.getElementById('dayQualityBadge').innerHTML =
-    `<span style="background: #6b7280; color: white; padding: 8px 16px; border-radius: 6px; display: inline-block;">Weekend — Market Closed</span>`;
-  document.getElementById('step1Content').innerHTML = `
-    <div style="background: #1e2330; border-left: 4px solid #6b7280; padding: 12px; border-radius: 4px;">
-      <strong style="color: #9ca3af;">Market Closed — Weekend</strong><br>
-      <span class="muted">No grading until Monday.</span>
-    </div>`;
-  // Also clear the EOD tab so it doesn't show stale data from a prior session
-  const eodEl = document.getElementById('eodContent');
-  if (eodEl) eodEl.innerHTML = eodGuardHTML(dateStr);
+  document.getElementById('dayQualityBadge').innerHTML = '';
+  document.getElementById('morningWindowLabel').textContent = '';
+  document.getElementById('step1Content').innerHTML = noticeHTML(title, detail);
 }
 
 async function loadAndRender(dateStr) {
-  viewingDate = dateStr || todayET();
+  viewingDate = dateStr;
+  document.getElementById('recapLink').href = `pages/trade_recap.html?date=${dateStr}`;
   if (isWeekend(dateStr)) {
-    renderWeekend(dateStr);
+    renderEmpty(dateStr, 'Market Closed — Weekend', 'No session to plan. Pick a weekday.');
     return;
   }
-
-  const url = (!dateStr || dateStr === todayET() || dateStr === latestDate)
-    ? 'data/cache/trading_signals.json'
-    : `data/cache/trading_signals_${dateStr}.json`;
-
-  const response = await fetch(url);
-  if (!response.ok) {
-    if (response.status === 404) {
-      ['step-2','step-3','step-4','step-5'].forEach(id =>
-        document.getElementById(id).style.display = 'none');
-      document.getElementById('step1Content').innerHTML =
-        `<div style="color: #9ca3af; padding: 12px;">No data available for ${dateStr}.</div>`;
-      // Clear EOD tab so it doesn't show stale data
-      const eodEl = document.getElementById('eodContent');
-      if (eodEl) eodEl.innerHTML = eodGuardHTML(viewingDate);
-      return;
-    }
-    throw new Error(`Failed to fetch: ${response.status}`);
+  session = await loadSession(dateStr);
+  if (!session) {
+    renderEmpty(dateStr, 'No data yet',
+      `The generator hasn't written ${dateStr}. The premarket stage appears after the first run of the day.`);
+    return;
   }
-  cacheData = await response.json();
+  if (!session.premarket) {
+    renderEmpty(dateStr, 'Written in the old format',
+      `${dateStr} predates the stage layout. Regenerate it with scripts/backfill_trading_history.py --force.`);
+    return;
+  }
+  if (!hasStage(session, 'premarket')) {
+    renderEmpty(dateStr, 'Premarket not available', stageMessage(session, 'premarket'));
+    return;
+  }
+  const selector = document.getElementById('symbolSelector');
+  selectedSymbol = fillSymbolSelector(selector, Object.keys(session.premarket?.symbols || {}), selectedSymbol);
   renderAll();
 }
 
@@ -1394,64 +978,33 @@ async function init() {
     link.addEventListener('click', () => { link.href = issueUrl('data'); });
   });
 
-  try {
-    const response = await fetch('data/cache/trading_signals.json');
-    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
-    cacheData = await response.json();
+  const selector = document.getElementById('symbolSelector');
+  selector.addEventListener('change', () => {
+    selectedSymbol = selector.value;
+    if (session) renderAll();
+  });
 
-    latestDate = cacheData.symbols?.SPY?.date || todayET();
-    const today = todayET();
+  const today  = todayET();
+  const picker = document.getElementById('tradeDatePicker');
+  picker.value = today;
+  picker.max   = today;
 
-    // Populate symbol selector
-    const selector = document.getElementById('symbolSelector');
-    Object.keys(cacheData.symbols).forEach(sym => {
-      const opt = document.createElement('option');
-      opt.value = sym;
-      opt.textContent = sym;
-      if (sym === selectedSymbol) opt.selected = true;
-      selector.appendChild(opt);
-    });
-    selector.addEventListener('change', () => {
-      selectedSymbol = selector.value;
-      // renderAll rebuilds the morning view and passes it to every renderer.
-      // Calling the renderers directly here left them on their pre-view-model
-      // signatures, and re-applied a C/F veto the page no longer honours.
-      renderAll();
-    });
-
-    const picker = document.getElementById('tradeDatePicker');
-    picker.value = today;
-    picker.max   = today;
-
-    picker.addEventListener('change', async () => {
-      try {
-        await loadAndRender(picker.value);
-      } catch (error) {
-        console.error('Error loading date:', error);
-        document.getElementById('step1Content').innerHTML =
-          `<div class="error">Error loading data: ${error.message}</div>`;
-      }
-    });
-
-    document.getElementById('tradeDateToday').addEventListener('click', async () => {
-      picker.value = today;
-      await loadAndRender(today);
-    });
-
-    if (isWeekend(today)) {
-      viewingDate = today;
-      renderWeekend(today);
-    } else {
-      // Today reads trading_signals.json; dated caches are only for past days.
-      viewingDate = today;
-      renderAll();
+  const load = async (dateStr) => {
+    try {
+      await loadAndRender(dateStr);
+    } catch (error) {
+      console.error('Error loading date:', error);
+      document.getElementById('step1Content').innerHTML =
+        `<div class="error">Error loading data: ${error.message}</div>`;
     }
+  };
+  picker.addEventListener('change', () => load(picker.value));
+  document.getElementById('tradeDateToday').addEventListener('click', () => {
+    picker.value = today;
+    load(today);
+  });
 
-  } catch (error) {
-    console.error('Error:', error);
-    document.getElementById('step-1').innerHTML =
-      `<div class="error">Error loading data: ${error.message}</div>`;
-  }
+  await load(today);
 }
 
 document.addEventListener('DOMContentLoaded', init);

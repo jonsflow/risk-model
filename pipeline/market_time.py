@@ -87,6 +87,16 @@ def bar_minutes(ts: int) -> int:
     return market_minutes(datetime.fromtimestamp(ts, tz=timezone.utc))
 
 
+def bar_start(ts: int) -> datetime:
+    """An intraday bar's start as an aware market-local datetime."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(MARKET_TZ)
+
+
+def market_datetime(session_date: date, local_time: time) -> datetime:
+    """session_date at a market-local wall time, as an aware datetime."""
+    return datetime.combine(session_date, local_time, tzinfo=MARKET_TZ)
+
+
 def bar_clock(ts: int) -> str:
     """Market-local time of day as 'HH:MM', for display."""
     return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(MARKET_TZ).strftime('%H:%M')

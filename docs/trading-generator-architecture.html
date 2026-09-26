@@ -1,0 +1,268 @@
+<title>Trading Stage Generator</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f5f6f9; --surface: #ffffff; --ink: #1b2230; --muted: #5a6474; --line: #d5dae3;
+    --pm: #3a5bd9; --op: #b8770f; --or: #0d8579; --rc: #b33d76;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #12151b; --surface: #1a1f28; --ink: #e5e8ee; --muted: #98a1b0; --line: #2d3440;
+      --pm: #8199ff; --op: #e6a940; --or: #3fc2b2; --rc: #e57aab;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12151b; --surface: #1a1f28; --ink: #e5e8ee; --muted: #98a1b0; --line: #2d3440;
+    --pm: #8199ff; --op: #e6a940; --or: #3fc2b2; --rc: #e57aab;
+  }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); padding-inline: 20px; padding-block: 36px 56px; }
+  main { max-width: 920px; margin: 0 auto; display: grid; gap: 34px; }
+  h1 { font-size: 1.9rem; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 10px; text-wrap: balance; }
+  p { margin: 0; max-width: 68ch; }
+  .lede { color: var(--muted); }
+  code { font: 0.86em var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 640px; height: auto; color: var(--ink); font-family: var(--sans); }
+  figcaption { color: var(--muted); font-size: 0.86rem; margin-top: 10px; max-width: 72ch; }
+  .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .wire { stroke: currentColor; stroke-width: 1.3; fill: none; opacity: 0.55; }
+  .cut { stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }
+  .axis { stroke: var(--line); stroke-width: 1.2; }
+  .t { fill: currentColor; font-size: 12.5px; }
+  .tb { fill: currentColor; font-size: 13px; font-weight: 600; }
+  .tm { fill: var(--muted); font-size: 11px; }
+  .code { fill: currentColor; font: 11.5px var(--mono); }
+  .pm { fill: var(--pm); } .op { fill: var(--op); } .or { fill: var(--or); } .rc { fill: var(--rc); }
+  .pms { stroke: var(--pm); } .ops { stroke: var(--op); } .ors { stroke: var(--or); } .rcs { stroke: var(--rc); }
+  .arrowhead { fill: currentColor; opacity: 0.55; }
+  .tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 0.9rem; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
+  ul.rules { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+  .muted { color: var(--muted); }
+</style>
+
+<main>
+  <header>
+    <h1>Trading Stage Generator</h1>
+    <p class="lede"><code>pipeline/generators/trading_generator.py</code> writes one file per session, <code>data/cache/trading_signals_&lt;date&gt;.json</code>, with one section per stage. Each stage reads only the bars that had ended by its window end, so a run at any time writes the same answer.</p>
+  </header>
+
+  <section>
+    <h2>Data flow</h2>
+    <figure>
+      <svg viewBox="0 0 900 290" role="img" aria-label="SQLite bars load once into PriceHistory; get_time_series returns each symbol's bars for a stage; four stage builders write four sections of one session file; the trade and recap pages render them.">
+        <defs>
+          <marker id="ah" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>
+        </defs>
+        <text class="tm" x="10"  y="26">SQLite</text>
+        <text class="tm" x="190" y="26">Loaded once</text>
+        <text class="tm" x="360" y="26">Stage builders</text>
+        <text class="tm" x="750" y="26">Pages</text>
+
+        <rect class="box" x="10" y="40"  width="140" height="44" rx="5"/><text class="code" x="20" y="60">prices_daily</text><text class="tm" x="20" y="75">is_complete stamped</text>
+        <rect class="box" x="10" y="100" width="140" height="44" rx="5"/><text class="code" x="20" y="120">prices_hourly</text><text class="tm" x="20" y="135">pre/post</text>
+        <rect class="box" x="10" y="160" width="140" height="44" rx="5"/><text class="code" x="20" y="180">prices_5m</text><text class="tm" x="20" y="195">pre/post from 04:00</text>
+        <rect class="box" x="10" y="220" width="140" height="44" rx="5"/><text class="tm" x="20" y="240">trading symbols</text><text class="tm" x="20" y="255">+ VIX (no 5-min)</text>
+
+        <rect class="box" x="190" y="40" width="130" height="224" rx="5"/>
+        <text class="code" x="202" y="80">PriceHistory</text>
+        <text class="tm" x="202" y="96">symbol → timeframe</text>
+        <text class="tm" x="202" y="110">→ bars</text>
+        <text class="code" x="202" y="168">get_time_series(</text>
+        <text class="code" x="202" y="184">  symbol, stage)</text>
+        <text class="tm" x="202" y="202">per symbol, per stage</text>
+
+        <rect class="box" x="360" y="40"  width="160" height="44" rx="5"/><rect class="pm" x="360" y="40"  width="5" height="44"/><text class="code" x="374" y="67">_stage_premarket</text>
+        <rect class="box" x="360" y="100" width="160" height="44" rx="5"/><rect class="op" x="360" y="100" width="5" height="44"/><text class="code" x="374" y="127">_stage_open</text>
+        <rect class="box" x="360" y="160" width="160" height="44" rx="5"/><rect class="or" x="360" y="160" width="5" height="44"/><text class="code" x="374" y="187">_stage_opening_range</text>
+        <rect class="box" x="360" y="220" width="160" height="44" rx="5"/><rect class="rc" x="360" y="220" width="5" height="44"/><text class="code" x="374" y="247">_stage_recap</text>
+
+        <rect class="frame" x="556" y="8" width="158" height="270" rx="7"/>
+        <text class="code" x="566" y="26">trading_signals_&lt;date&gt;</text>
+        <rect class="box" x="566" y="40"  width="138" height="44" rx="5"/><rect class="pm" x="566" y="40"  width="5" height="44"/><text class="code" x="580" y="67">premarket</text>
+        <rect class="box" x="566" y="100" width="138" height="44" rx="5"/><rect class="op" x="566" y="100" width="5" height="44"/><text class="code" x="580" y="127">open</text>
+        <rect class="box" x="566" y="160" width="138" height="44" rx="5"/><rect class="or" x="566" y="160" width="5" height="44"/><text class="code" x="580" y="187">opening_range</text>
+        <rect class="box" x="566" y="220" width="138" height="44" rx="5"/><rect class="rc" x="566" y="220" width="5" height="44"/><text class="code" x="580" y="247">recap</text>
+
+        <rect class="box" x="750" y="40"  width="140" height="164" rx="5"/><text class="code" x="762" y="116">trade.html</text><text class="tm" x="762" y="132">live page</text>
+        <rect class="box" x="750" y="220" width="140" height="44"  rx="5"/><text class="code" x="762" y="240">trade_recap.html</text><text class="tm" x="762" y="255">graded calls</text>
+
+        <g marker-end="url(#ah)">
+          <line class="wire" x1="150" y1="62"  x2="188" y2="62"/>
+          <line class="wire" x1="150" y1="122" x2="188" y2="122"/>
+          <line class="wire" x1="150" y1="182" x2="188" y2="182"/>
+          <line class="wire" x1="150" y1="242" x2="188" y2="242"/>
+          <line class="wire" x1="320" y1="62"  x2="358" y2="62"/>
+          <line class="wire" x1="320" y1="122" x2="358" y2="122"/>
+          <line class="wire" x1="320" y1="182" x2="358" y2="182"/>
+          <line class="wire" x1="320" y1="242" x2="358" y2="242"/>
+          <line class="wire" x1="520" y1="62"  x2="564" y2="62"/>
+          <line class="wire" x1="520" y1="122" x2="564" y2="122"/>
+          <line class="wire" x1="520" y1="182" x2="564" y2="182"/>
+          <line class="wire" x1="520" y1="242" x2="564" y2="242"/>
+          <line class="wire" x1="704" y1="62"  x2="748" y2="62"/>
+          <line class="wire" x1="704" y1="122" x2="748" y2="122"/>
+          <line class="wire" x1="704" y1="182" x2="748" y2="182"/>
+          <line class="wire" x1="704" y1="242" x2="748" y2="242"/>
+        </g>
+        <text class="tm" x="523" y="78">writes</text>
+        <text class="tm" x="708" y="78">renders</text>
+      </svg>
+      <figcaption>Bars load from SQLite once. Each stage asks <code>get_time_series</code> for every symbol's bars in its window; later stages also read the sections before them — the opening range scores the premarket watchlist, the recap grades the earlier calls.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>get_time_series(symbol, stage)</h2>
+    <figure>
+      <svg viewBox="0 0 900 215" role="img" aria-label="get_time_series: with no stage, all bars in every timeframe. With a stage, if every timeframe is there through the window end, each timeframe cut to bars ended by the window end; otherwise not available.">
+        <defs>
+          <marker id="ah3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>
+        </defs>
+        <rect class="box" x="10" y="75" width="190" height="46" rx="5"/>
+        <text class="code" x="105" y="96" text-anchor="middle">get_time_series(</text>
+        <text class="code" x="105" y="111" text-anchor="middle">symbol, stage)</text>
+
+        <polygon class="box" points="215,98 270,64 325,98 270,132"/>
+        <text class="t" x="270" y="102" text-anchor="middle">stage?</text>
+
+        <rect class="box" x="360" y="4" width="200" height="40" rx="5"/>
+        <text class="t" x="460" y="28" text-anchor="middle">all bars, every timeframe</text>
+
+        <polygon class="box" points="380,98 480,58 580,98 480,138"/>
+        <text class="t" x="480" y="95" text-anchor="middle">every timeframe there</text>
+        <text class="t" x="480" y="111" text-anchor="middle">through window_end?</text>
+
+        <rect class="box" x="400" y="164" width="160" height="44" rx="5"/>
+        <text class="t" x="480" y="184" text-anchor="middle">not available</text>
+        <text class="tm" x="480" y="199" text-anchor="middle">standard message</text>
+
+        <rect class="box" x="624" y="74" width="266" height="48" rx="5"/>
+        <text class="t" x="757" y="94" text-anchor="middle">each of the stage's timeframes:</text>
+        <text class="t" x="757" y="111" text-anchor="middle">bars that ended by window_end</text>
+
+        <g marker-end="url(#ah3)">
+          <line class="wire" x1="200" y1="98" x2="213" y2="98"/>
+          <polyline class="wire" points="270,64 270,24 358,24"/>
+          <line class="wire" x1="325" y1="98" x2="378" y2="98"/>
+          <line class="wire" x1="480" y1="138" x2="480" y2="162"/>
+          <line class="wire" x1="580" y1="98" x2="622" y2="98"/>
+        </g>
+        <text class="tm" x="276" y="50">none</text>
+        <text class="tm" x="332" y="92">given</text>
+        <text class="tm" x="486" y="154">no</text>
+        <text class="tm" x="590" y="92">yes</text>
+      </svg>
+      <figcaption>A daily bar ends at its session's close, once marked complete — so today's daily bar only reaches the recap. Timeframes never collected for a symbol are skipped: VIX has no 5-min bars, so it's checked on daily and hourly.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>What each stage reads</h2>
+    <figure>
+      <svg viewBox="0 0 760 250" role="img" aria-label="Timeline of one session in Eastern time. Premarket reads 5-minute bars to 09:00, open reads the 09:30 bar, opening range reads 09:30 to 10:00, recap reads the full session after the close.">
+        <line class="axis" x1="150" y1="40" x2="610" y2="40"/>
+        <line class="axis" x1="640" y1="40" x2="740" y2="40"/>
+        <text class="tm" x="625" y="44" text-anchor="middle">⋯</text>
+        <text class="tm" x="150" y="30" text-anchor="middle">08:00</text>
+        <text class="tm" x="456.7" y="30" text-anchor="middle">09:30 open</text>
+        <text class="tm" x="690" y="30" text-anchor="middle">16:00 close</text>
+
+        <line class="cut" x1="354.4" y1="40" x2="354.4" y2="236"/>
+        <line class="cut" x1="473.7" y1="40" x2="473.7" y2="236"/>
+        <line class="cut" x1="558.9" y1="40" x2="558.9" y2="236"/>
+        <line class="cut" x1="690"   y1="40" x2="690"   y2="236"/>
+        <text class="tm" x="354.4" y="248" text-anchor="middle">09:00</text>
+        <text class="tm" x="473.7" y="248" text-anchor="middle">09:35</text>
+        <text class="tm" x="558.9" y="248" text-anchor="middle">10:00</text>
+        <text class="tm" x="690"   y="248" text-anchor="middle">16:00</text>
+
+        <text class="tb" x="10" y="80">Premarket</text><text class="tm" x="10" y="95">daily · 1 h · 5 min</text>
+        <rect class="pm" x="150" y="68" width="204.4" height="22" rx="3" opacity="0.85"/>
+        <text class="t" x="362" y="84">range, last print, VIX</text>
+
+        <text class="tb" x="10" y="128">Open</text><text class="tm" x="10" y="143">daily · 5 min</text>
+        <rect class="op" x="456.7" y="116" width="17" height="22" rx="3" opacity="0.85"/>
+        <text class="t" x="482" y="132">first 5-min bar</text>
+
+        <text class="tb" x="10" y="176">Opening range</text><text class="tm" x="10" y="191">daily · 5 min</text>
+        <rect class="or" x="456.7" y="164" width="102.2" height="22" rx="3" opacity="0.85"/>
+        <text class="t" x="567" y="180">OR + scores</text>
+
+        <text class="tb" x="10" y="224">Recap</text><text class="tm" x="10" y="239">daily · 5 min</text>
+        <rect class="rc" x="456.7" y="212" width="153.3" height="22" rx="3" opacity="0.85"/>
+        <rect class="rc" x="640" y="212" width="50" height="22" rx="3" opacity="0.85"/>
+      </svg>
+      <figcaption>Dashed lines are the window ends; bars show the intraday span each stage adds. Before the recap, daily bars are closed sessions only. Window ends come from the <code>stages</code> block in <code>config/trading_config.json</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>How a session file fills in</h2>
+    <figure>
+      <svg viewBox="0 0 770 170" role="img" aria-label="Each workflow run just after a stage's window end adds that stage's section; a stage whose data isn't there carries the standard not-available message. Re-running writes the same file.">
+        <defs>
+          <marker id="ah2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>
+        </defs>
+        <rect class="box" x="10"  y="30" width="118" height="54" rx="27"/><text class="tb" x="69" y="62" text-anchor="middle">No file</text>
+        <rect class="box pms" x="166" y="30" width="118" height="54" rx="27" stroke-width="2"/><text class="tb" x="225" y="62" text-anchor="middle">Premarket</text>
+        <rect class="box ops" x="322" y="30" width="118" height="54" rx="27" stroke-width="2"/><text class="tb" x="381" y="62" text-anchor="middle">+ Open</text>
+        <rect class="box ors" x="478" y="30" width="118" height="54" rx="27" stroke-width="2"/><text class="tb" x="537" y="62" text-anchor="middle">+ Opening range</text>
+        <rect class="box rcs" x="634" y="30" width="118" height="54" rx="27" stroke-width="2"/><text class="tb" x="693" y="62" text-anchor="middle">+ Recap</text>
+        <g marker-end="url(#ah2)">
+          <line class="wire" x1="128" y1="57" x2="164" y2="57"/>
+          <line class="wire" x1="284" y1="57" x2="320" y2="57"/>
+          <line class="wire" x1="440" y1="57" x2="476" y2="57"/>
+          <line class="wire" x1="596" y1="57" x2="632" y2="57"/>
+        </g>
+        <text class="tm" x="225" y="104" text-anchor="middle">run after 09:00</text>
+        <text class="tm" x="381" y="104" text-anchor="middle">run after 09:35</text>
+        <text class="tm" x="537" y="104" text-anchor="middle">run after 10:00</text>
+        <text class="tm" x="693" y="104" text-anchor="middle">run after the close</text>
+        <path class="wire" d="M 225 30 C 205 4, 245 4, 227 28" marker-end="url(#ah2)"/>
+        <text class="tm" x="260" y="16">re-run → identical</text>
+        <line class="axis" x1="166" y1="134" x2="752" y2="134"/>
+        <text class="tm" x="166" y="152">Sections not yet reached carry { status: "not_available", window_end, message }.</text>
+      </svg>
+      <figcaption>The workflow runs just after each window end: it fetches, then the generator rewrites the whole file. Sections already there come out the same; the pages show the message for any stage that isn't available.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Stage map</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Stage</th><th>Window end</th><th>Timeframes</th><th>Produces</th><th>Shown on</th></tr></thead>
+        <tbody>
+          <tr><td><span class="dot pm"></span>Premarket</td><td><code>premarket_window_end</code> 09:00</td><td>daily, 1 h, 5 min</td><td>Day grade (alignment held neutral), regime (daily trend + ATR trend), hourly vs daily structure, gap to last print, premarket range, VIX, vol regime, watchlist</td><td>Trade page Steps 1–3</td></tr>
+          <tr><td><span class="dot op"></span>Open</td><td>09:30 + <code>open_bar_min</code></td><td>daily, 5 min</td><td>First bar OHLC, gap vs prior close, first-bar lean, filled in first bar. No targets.</td><td>Open card</td></tr>
+          <tr><td><span class="dot or"></span>Opening range</td><td>09:30 + <code>opening_range_min</code></td><td>daily, 5 min</td><td>OR high/low, ORB qualification, targets, index alignment; confluence, sizing and plan for each setup</td><td>Opening range card, Steps 4–5</td></tr>
+          <tr><td><span class="dot rc"></span>Recap</td><td>16:00 close</td><td>daily, 5 min</td><td>Realized grade vs the premarket call, each symbol's outcome, first-bar call graded, every call resolved</td><td>Recap page</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rules</h2>
+    <ul class="rules">
+      <li>A <code>Stage</code> is a model — name, label, window end, timeframes. <code>get_time_series</code> fetches what it describes and nothing else.</li>
+      <li>A stage is available when SPY's data is there through its window end; other symbols without data are left out of the section.</li>
+      <li>Stages never overwrite each other. A later stage reads earlier sections; it never recomputes them.</li>
+      <li>Pages read the sections and show the standard message for a stage that isn't available.</li>
+      <li><code>tests/test_trading_stages.py</code> replays the latest stored session at 09:00, 09:40, 13:00 and after the close, and checks each stage against the post-close run.</li>
+    </ul>
+  </section>
+</main>

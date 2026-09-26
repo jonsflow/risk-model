@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Trade Recap</title>
+  <base href="../">
+  <link rel="stylesheet" href="styles/styles.css">
+  <meta name="description" content="Each stage's trading calls graded against the finished session." />
+</head>
+<body class="trade-page">
+  <nav class="site-nav"></nav>
+
+  <div class="card">
+    <div class="header-section">
+      <div>
+        <h1 style="margin:0 0 4px 0">Trade Recap</h1>
+        <div class="muted" id="headerMeta">Loading data…</div>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap; margin-top: 8px;">
+        <label for="symbolSelector" class="muted" style="font-size: 0.85em;">Symbol:</label>
+        <select id="symbolSelector" style="background: #22242a; color: #e2e8f0; border: 1px solid #374151; border-radius: 4px; padding: 4px 8px; font-size: 0.85em;"></select>
+        <label for="recapDatePicker" class="muted" style="font-size: 0.85em;">Date:</label>
+        <input type="date" id="recapDatePicker" style="background: #22242a; color: #e2e8f0; border: 1px solid #374151; border-radius: 4px; padding: 4px 8px; font-size: 0.85em;">
+        <a id="liveLink" href="pages/trade.html" style="color: #7aa2f7; font-size: 0.85em; text-decoration: none;">← Live page</a>
+      </div>
+    </div>
+  </div>
+
+  <div id="recapContent">Loading…</div>
+
+  <div class="card" style="margin-top: 18px;">
+    <div class="muted" style="text-align:center;font-size:12px">
+      <span style="color:#6b7280;">Not financial advice — for research and informational purposes only.</span>
+    </div>
+  </div>
+
+  <script type="module" src="js/pages/trade_recap.js"></script>
+</body>
+</html>

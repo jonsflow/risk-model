@@ -1,40 +1,34 @@
 """
 pipeline/generators/trading_generator.py — Trading signals cache generator.
 
-Replaces generate_trading_cache.py.
-Reads OHLCV from SQLite; writes data/cache/trading_signals.json.
-The premarket (9 AM ET) run and post-close (4:15 PM ET) run both write to
-this same file. Which one produced it is stated explicitly in `phase`
-("premarket" / "intraday" / "eod") and `session_complete` — consumers must
-read those rather than inferring completeness from field shapes.
+Reads OHLCV from SQLite; writes data/cache/trading_signals_<session_date>.json,
+one file per session with one section per stage:
 
-Completeness is a property of the data, not of the clock. The fetcher stamps
-every daily bar with is_complete (collected_at >= that session's close), so:
-  * _completed_bars() filters on that flag. Anything treating a bar as a
-    finished session — ATR, MA, pivots, day classification — reads through it.
-    A partial bar is never in the list, so no run can accidentally analyse one.
-  * eod_outcome and day_realized are withheld until the session's own bar is
-    marked complete. A late-firing morning run therefore cannot publish a
-    half-finished day as a final result.
-  * Dated history files are written only for finished sessions.
+  premarket      closed daily bars + 5-min/hourly ending by the premarket window end
+  open           + the first RTH 5-min bar
+  opening_range  + 5-min bars through the opening range
+  recap          the finished session, once its daily bar is complete
 
-No timezone conversion happens in this module for daily bars — session identity
-comes from the stored session_date. Intraday window questions (ORB, last hour)
-go through pipeline/market_time.py.
+Each stage reads only data that ended by its window end, whenever the run happens —
+live, late or in a backfill — so recomputing a stage always gives the same
+answer and later stages never replace earlier ones. A stage whose data does
+not exist yet is empty. Window ends come from the `stages` block in
+config/trading_config.json.
 
-day_quality is always the pre-open forecast. day_realized (EOD only) records
-what the session actually delivered, so the two can be compared over time.
+Daily bars are read only once closed (is_complete, stamped at ingest).
+Timezone questions go through pipeline/market_time.py.
 """
 
 import json
 import math
 import statistics
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from pipeline.base_generator import BaseGenerator
-from pipeline.analysis import find_pivot_highs, find_pivot_lows
+from pipeline.analysis import classify_structure, find_pivot_highs, find_pivot_lows
 from pipeline.market_time import (
-    bar_clock, bar_minutes, bar_session_date, in_session_window,
+    RTH_CLOSE, RTH_OPEN, bar_clock, bar_session_date, bar_start, market_datetime,
     parse_session_date, session_close_utc, session_open_utc,
 )
 
@@ -48,22 +42,26 @@ class TradingGenerator(BaseGenerator):
 
 
 # ------------------------------------------------------------------
-# All computation functions ported from generate_trading_cache.py
+# Config
 # ------------------------------------------------------------------
 
-def _load_config() -> tuple:
+@dataclass(frozen=True)
+class TradingConfig:
+    symbols: list
+    regime_symbols: list
+    regimes: dict
+    sizing: dict
+    targets: dict
+    stages: list        # [Stage], in session order
+
+
+def _load_config() -> TradingConfig:
     config_path = Path("config/trading_config.json")
     if not config_path.exists():
         raise FileNotFoundError("trading_config.json not found")
     config = json.loads(config_path.read_text())
-    trading_symbols, regime_symbols, ticker_map = [], [], {}
-    for entry in config["symbols"]:
-        symbol = entry["symbol"]
-        trading_symbols.append(symbol)
-        if entry.get("regime"):
-            regime_symbols.append(symbol)
-        if "ticker" in entry:
-            ticker_map[symbol] = entry["ticker"]
+    trading_symbols = [e["symbol"] for e in config["symbols"]]
+    regime_symbols  = [e["symbol"] for e in config["symbols"] if e.get("regime")]
     # Regime → favoured patterns is the single source of truth for "does this
     # setup fit today's tape". The generator stamps the verdict; the page renders
     # it. `patterns` are keys (matched on), `note` is prose (displayed only).
@@ -84,7 +82,11 @@ def _load_config() -> tuple:
     targets = config.get("targets")
     if not targets:
         raise ValueError("trading_config.json has no `targets` block")
-    return trading_symbols, regime_symbols, ticker_map, regimes, sizing, targets
+    stages = config.get("stages")
+    if not stages:
+        raise ValueError("trading_config.json has no `stages` block")
+    return TradingConfig(trading_symbols, regime_symbols, regimes, sizing, targets,
+                         Stage.all_from_config(stages))
 
 
 def _calculate_ema(values: list, period: int) -> list:
@@ -168,18 +170,6 @@ def _calculate_moving_average(points: list, period: int) -> list:
     return result
 
 
-def _get_session_bars(hourly_points, start_hhmm, end_hhmm, target_date=None):
-    """Filter bars to a market-local session window (930 = 09:30 ET), so
-    RTH-anchored filters (ORB, VWAP session, last hour) hit the intended bars
-    regardless of DST. Timezone handling lives in market_time."""
-    if not hourly_points:
-        return []
-    if target_date is None:
-        target_date = bar_session_date(hourly_points[-1][0])
-    return [(ts, ohlcv) for ts, ohlcv in hourly_points
-            if in_session_window(ts, start_hhmm, end_hhmm, target_date)]
-
-
 def _get_overnight_bars(bars, target_date):
     """Bars from the prior trading day's 16:00 ET close through target_date 09:30 ET.
     Walks back up to 7 calendar days to find the prior trading day, so this handles
@@ -191,7 +181,7 @@ def _get_overnight_bars(bars, target_date):
     for d in range(1, 8):
         candidate = target_date - timedelta(days=d)
         has_close_bars = any(
-            bar_session_date(ts) == candidate and bar_minutes(ts) >= 1600
+            bar_session_date(ts) == candidate and bar_start(ts).time() >= RTH_CLOSE
             for ts, _ in bars
         )
         if has_close_bars:
@@ -202,22 +192,6 @@ def _get_overnight_bars(bars, target_date):
     lower = session_close_utc(prior_date).timestamp()
     result = [(ts, ohlcv) for ts, ohlcv in bars if lower <= ts < upper]
     return result
-
-
-def _calculate_vwap(hourly_points):
-    if not hourly_points:
-        return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
-    session = _get_session_bars(hourly_points, 930, 1600)
-    if not session:
-        return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
-    cum_tp_vol = sum(((b['high'] + b['low'] + b['close']) / 3) * b['volume'] for _, b in session)
-    cum_vol    = sum(b['volume'] for _, b in session)
-    if cum_vol == 0:
-        return {'vwap': None, 'above_vwap': None, 'distance_pct': None}
-    vwap  = cum_tp_vol / cum_vol
-    close = session[-1][1]['close']
-    dist  = ((close - vwap) / vwap * 100) if vwap else 0.0
-    return {'vwap': round(vwap, 2), 'above_vwap': close > vwap, 'distance_pct': round(dist, 2)}
 
 
 def _calculate_rsi_divergence(hourly_points, swing=3):
@@ -293,17 +267,235 @@ def _calculate_squeeze(hourly_points):
     return {'status': status, 'momentum': round(momentum, 4), 'momentum_increasing': momentum_increasing}
 
 
-def _detect_gap(points):
-    if len(points) < 2:
-        return {'gap_pct': 0, 'gap_type': 'none', 'gap_significant': False, 'gap_strong': False}
-    prev_close = points[-2][1]['close']
-    today_open = points[-1][1]['open']
-    gap_pct = ((today_open - prev_close) / prev_close * 100) if prev_close else 0
-    if abs(gap_pct) < 0.1:  gap_type = 'none'
-    elif gap_pct > 0:        gap_type = 'up'
-    else:                    gap_type = 'down'
-    return {'gap_pct': round(gap_pct, 2), 'gap_type': gap_type,
-            'gap_significant': abs(gap_pct) > 1.0, 'gap_strong': abs(gap_pct) > 2.0}
+
+# ------------------------------------------------------------------
+# Daily bars
+# ------------------------------------------------------------------
+
+def _bar_date(point):
+    """Session a daily bar belongs to. Read from the stored session_date, which
+    the fetcher sets — no timezone interpretation happens here."""
+    sd = point[1].get('session_date')
+    if sd:
+        return parse_session_date(sd)
+    return datetime.fromtimestamp(point[0], tz=timezone.utc).date()
+
+
+def _completed_bars(points):
+    """Bars whose session had closed when they were fetched. Completeness is
+    stamped at ingest, so a partial bar simply isn't here."""
+    return [p for p in points if p[1].get('is_complete')]
+
+
+def _prior_bars(points, session_date):
+    """Completed bars from sessions before session_date."""
+    return [p for p in _completed_bars(points) if _bar_date(p) < session_date]
+
+
+def _session_bar(points, session_date):
+    """The daily bar for session_date, or None if it doesn't exist yet."""
+    for p in reversed(points):
+        if _bar_date(p) == session_date:
+            return p[1]
+    return None
+
+
+# ------------------------------------------------------------------
+# Stages and time series
+# ------------------------------------------------------------------
+# Every stage reads its data through get_time_series(). A stage's answer
+# depends only on data that had ended by its window_end, so a live run, a
+# late run and a backfill all agree.
+
+DAILY    = timedelta(days=1)
+ONE_HOUR = timedelta(hours=1)
+FIVE_MIN = timedelta(minutes=5)
+PREMARKET_START  = time(8, 0)   # the premarket range is measured from here
+REFERENCE_SYMBOL = 'SPY'        # a stage is available once this symbol's data is there
+
+
+@dataclass(frozen=True)
+class Stage:
+    """One stage of the session.
+
+    window_end  market-local time the stage's window ends; it reads every bar
+                that had ended by then
+    timeframes  the bar intervals it reads
+    """
+    name: str
+    label: str
+    window_end: time
+    timeframes: tuple
+
+    @classmethod
+    def all_from_config(cls, stages_config):
+        def after_open(minutes):
+            return (datetime.combine(date.min, RTH_OPEN) + timedelta(minutes=minutes)).time()
+        return [
+            cls('premarket', 'Premarket',
+                time.fromisoformat(stages_config['premarket_window_end']), (DAILY, ONE_HOUR, FIVE_MIN)),
+            cls('open', 'Open',
+                after_open(stages_config['open_bar_min']), (DAILY, FIVE_MIN)),
+            cls('opening_range', 'Opening range',
+                after_open(stages_config['opening_range_min']), (DAILY, FIVE_MIN)),
+            cls('recap', 'Recap', RTH_CLOSE, (DAILY, FIVE_MIN)),
+        ]
+
+
+@dataclass
+class TimeSeries:
+    """One symbol's bars, by timeframe — all of them, or one stage's window.
+    `available` is False when the stage's data isn't there yet; bars is then
+    empty."""
+    symbol: str
+    stage: Stage | None
+    available: bool
+    bars: dict
+
+    @property
+    def daily(self):
+        return self.bars.get(DAILY, [])
+
+    @property
+    def hourly(self):
+        return self.bars.get(ONE_HOUR, [])
+
+    @property
+    def five_min(self):
+        return self.bars.get(FIVE_MIN, [])
+
+
+def _bar_end(point, timeframe):
+    """When a bar ended, or None if it hasn't. A daily bar ends at its
+    session's close, once marked complete. Yahoo cuts hourly bars at the open
+    and the close, so the 09:00 hourly bar ends at 09:30."""
+    if timeframe == DAILY:
+        return session_close_utc(_bar_date(point)) if point[1].get('is_complete') else None
+    start = bar_start(point[0])
+    end = start + timeframe
+    for boundary in (RTH_OPEN, RTH_CLOSE):
+        b = market_datetime(start.date(), boundary)
+        if start < b < end:
+            end = b
+    return end
+
+
+def _ended_by(bars, timeframe, end):
+    """Bars that had ended by `end`. Intraday bars are mostly decided on their
+    epoch alone; only one straddling `end` needs its real close worked out."""
+    if timeframe == DAILY:
+        return [p for p in bars if (e := _bar_end(p, DAILY)) is not None and e <= end]
+    end_ts, span = end.timestamp(), timeframe.total_seconds()
+    return [p for p in bars
+            if p[0] + span <= end_ts or (p[0] < end_ts and _bar_end(p, timeframe) <= end)]
+
+
+@dataclass
+class PriceHistory:
+    """Every stored bar for the symbols, loaded once, and the session they're
+    being read for: the latest session with reference-symbol data (daily or
+    5-min) on or before `through`."""
+    session_date: date | None
+    bars: dict          # symbol → {timeframe: bars}
+
+    @classmethod
+    def load(cls, db, symbols, through=None):
+        bars = {s: {DAILY: db.load_daily_ohlcv(s),
+                    ONE_HOUR: db.load_hourly_ohlcv(s),
+                    FIVE_MIN: db.load_5m_ohlcv(s)} for s in symbols}
+        found = []
+        ref = bars.get(REFERENCE_SYMBOL, {})
+        for d in (_bar_date(p) for p in reversed(ref.get(DAILY, []))):
+            if through is None or d <= through:
+                found.append(d)
+                break
+        for d in (bar_session_date(ts) for ts, _ in reversed(ref.get(FIVE_MIN, []))):
+            if through is None or d <= through:
+                found.append(d)
+                break
+        return cls(max(found) if found else None, bars)
+
+    def get_time_series(self, symbol, stage=None):
+        """A symbol's time series. No stage: every bar stored, in every
+        timeframe. A stage: first checks the data reaches its window end — if
+        not, returns it as unavailable — then the stage's timeframes, each cut
+        to the bars that had ended by window_end."""
+        by_tf = self.bars.get(symbol, {})
+        if stage is None:
+            return TimeSeries(symbol, None, True, dict(by_tf))
+        end = market_datetime(self.session_date, stage.window_end)
+        if not self._reaches(by_tf, stage, end):
+            return TimeSeries(symbol, stage, False, {})
+        return TimeSeries(symbol, stage, True,
+                          {tf: _ended_by(by_tf.get(tf, []), tf, end) for tf in stage.timeframes})
+
+    def _reaches(self, by_tf, stage, end):
+        """Is every timeframe the stage reads there through its window end?
+        Timeframes never collected for this symbol (VIX has no 5-min) are
+        skipped; a symbol with none of them isn't available."""
+        checked = False
+        for tf in stage.timeframes:
+            bars = by_tf.get(tf, [])
+            if not bars:
+                continue
+            checked = True
+            if not self._timeframe_reaches(bars, tf, end):
+                return False
+        return checked
+
+    def _timeframe_reaches(self, bars, timeframe, end):
+        """Daily: before the close, the latest bar from an earlier session is
+        complete; at the close, the session's own bar is. Intraday: a bar from
+        this session ended at or after the window end."""
+        S = self.session_date
+        if timeframe == DAILY:
+            if end >= session_close_utc(S):
+                bar = _session_bar(bars, S)
+                return bool(bar and bar.get('is_complete'))
+            prior = [p for p in bars if _bar_date(p) < S]
+            return bool(prior and prior[-1][1].get('is_complete'))
+        day_start = market_datetime(S, time.min).timestamp()
+        next_day  = market_datetime(S + timedelta(days=1), time.min).timestamp()
+        for p in reversed(bars):
+            if p[0] < day_start:
+                break
+            if p[0] < next_day and _bar_end(p, timeframe) >= end:
+                return True
+        return False
+
+
+def _not_available(stage):
+    """The standard section for a stage whose data isn't there yet."""
+    return {
+        'status': 'not_available',
+        'window_end': f"{stage.window_end:%H:%M}",
+        'message': f"{stage.label} isn't available yet — it needs data through "
+                   f"{stage.window_end:%H:%M} ET.",
+    }
+
+
+def _window(bars, session_date, start, end):
+    """Bars of session_date that started in [start, end), market-local times."""
+    lo = market_datetime(session_date, start).timestamp()
+    hi = market_datetime(session_date, end).timestamp()
+    return [p for p in bars if lo <= p[0] < hi]
+
+
+def _last_print(bars, session_date):
+    """Last 5-min close on session_date, in bars already cut to a stage."""
+    last = None
+    for ts, b in bars:
+        if bar_session_date(ts) == session_date:
+            last = b['close']
+    return last
+
+
+def _atr_prior(prior):
+    """(ATR-14, its 20-day average) as of the last closed bar."""
+    atr_vals = _calculate_atr(prior, 14)
+    if not atr_vals:
+        return 0.0, 0.0
+    return atr_vals[-1][1], sum(a[1] for a in atr_vals[-20:]) / min(20, len(atr_vals))
 
 
 def _detect_outside_day(points):
@@ -318,76 +510,12 @@ def _detect_outside_day(points):
     return 'none'
 
 
-_RTH_OPEN_HHMM = 930
-
-
-def _bar_date(point):
-    """Session a daily bar belongs to. Read from the stored session_date, which
-    the fetcher sets — no timezone interpretation happens here."""
-    sd = point[1].get('session_date')
-    if sd:
-        return parse_session_date(sd)
-    return datetime.fromtimestamp(point[0], tz=timezone.utc).date()
-
-
-def _completed_bars(points):
-    """Bars whose session had closed when they were fetched.
-
-    Completeness is stamped at ingest, so this needs no clock, no timezone, and
-    no assumption about which run is executing. A partial bar simply isn't here.
-    """
-    return [p for p in points if p[1].get('is_complete')]
-
-
-def _prior_bars(points, session_date):
-    """Completed bars from sessions before session_date — the history a pre-open
-    call is allowed to see."""
-    completed = _completed_bars(points)
-    if session_date is None:
-        return completed
-    return [p for p in completed if _bar_date(p) < session_date]
-
-
-def _session_bar(points, session_date):
-    """The daily bar for session_date, or None if it doesn't exist yet."""
-    if session_date is None:
-        return points[-1][1] if points else None
-    for p in reversed(points):
-        if _bar_date(p) == session_date:
-            return p[1]
-    return None
-
-
-def _is_session_complete(points, session_date):
-    """Has session_date's bar been fetched after that session closed?"""
-    bar = _session_bar(points, session_date)
-    return bool(bar and bar.get('is_complete'))
-
-
-def _determine_phase(points, bars_5m, session_date):
-    """'premarket' | 'intraday' | 'eod' for the session being reported.
-
-    'eod' comes from the data itself — the session's bar is marked complete.
-    The premarket/intraday split is only about display, and is answered by
-    whether any regular-hours bar exists yet.
-    """
-    if session_date is None:
-        return 'premarket'
-    if _is_session_complete(points, session_date):
-        return 'eod'
-    for ts, _ in bars_5m or []:
-        if bar_session_date(ts) == session_date and bar_minutes(ts) >= _RTH_OPEN_HHMM:
-            return 'intraday'
-    return 'premarket'
-
-
 def _classify_day_type(points):
-    """Classify the most recent completed bar's range vs the prior bar.
+    """Classify the most recent bar's range vs the prior bar.
 
     'inside'  — range fully contained in the prior bar (compression / coil).
     'outside' — range engulfs the prior bar on both sides (expansion).
-    'normal'  — neither (ordinary higher/lower bar). Direction is intentionally
-    not distinguished here; candle-pattern refinement comes later.
+    'normal'  — neither.
     """
     if len(points) < 2:
         return 'normal'
@@ -417,22 +545,52 @@ def _percentile_rank(series, value):
     return round(sum(1 for x in series if x <= value) / len(series) * 100, 1)
 
 
-def _compute_premarket_metrics(hourly_points, target_date):
+def _median_gap(prior):
+    """Median absolute overnight gap over the last 20 closed sessions."""
+    gaps = [abs(prior[i][1]['open'] - prior[i-1][1]['close'])
+            for i in range(max(1, len(prior) - 20), len(prior))]
+    return statistics.median(gaps) if gaps else 0.0
+
+
+def _classify_gap(price, prior_close, median_gap):
+    """Gap from prior close to `price`, sized against the median overnight gap."""
+    if price is None or not prior_close:
+        return {'gap_pts': None, 'gap_pct': None, 'gap_type': 'none',
+                'gap_ratio': None, 'gap_significant': False, 'gap_strong': False}
+    pts = price - prior_close
+    pct = pts / prior_close * 100
+    ratio = abs(pts) / median_gap if median_gap > 0 else None
+    return {
+        'gap_pts':  round(pts, 2),
+        'gap_pct':  round(pct, 2),
+        'gap_type': 'none' if abs(pct) < 0.1 else ('up' if pts > 0 else 'down'),
+        'gap_ratio': round(ratio, 2) if ratio is not None else None,
+        'gap_significant': ratio is not None and ratio >= 0.5,
+        'gap_strong':      ratio is not None and ratio >= 1.5,
+    }
+
+
+# ------------------------------------------------------------------
+# Premarket stage
+# ------------------------------------------------------------------
+
+def _compute_premarket_metrics(bars, target_date, window_end):
+    """Premarket volume and range (PREMARKET_START → window_end) against the
+    same window on the prior 20 sessions."""
     no_data = {'rvol': {'score': 0, 'ratio': None, 'pm_vol_today': None, 'pm_vol_avg_20d': None},
                'range': {'score': 0, 'ratio': None, 'pm_range_today': None, 'pm_range_avg_20d': None},
                'has_data': False}
-    if not hourly_points or target_date is None:
+    if not bars:
         return no_data
     pm_by_date: dict = {}
-    for ts, ohlcv in hourly_points:
-        if 800 <= bar_minutes(ts) < 930:
-            pm_by_date.setdefault(bar_session_date(ts), []).append(ohlcv)
+    for ts, ohlcv in bars:
+        start = bar_start(ts)
+        if PREMARKET_START <= start.time() < window_end:
+            pm_by_date.setdefault(start.date(), []).append(ohlcv)
     today_bars = pm_by_date.get(target_date, [])
     if not today_bars: return no_data
     pm_vol_today   = sum(b['volume'] for b in today_bars)
-    pm_high_today  = max(b['high'] for b in today_bars)
-    pm_low_today   = min(b['low']  for b in today_bars)
-    pm_range_today = pm_high_today - pm_low_today
+    pm_range_today = max(b['high'] for b in today_bars) - min(b['low'] for b in today_bars)
     hist_dates = sorted(d for d in pm_by_date if d < target_date)[-20:]
     if not hist_dates: return no_data
     hist_vols   = [sum(b['volume'] for b in pm_by_date[d]) for d in hist_dates]
@@ -452,46 +610,387 @@ def _compute_premarket_metrics(hourly_points, target_date):
     }
 
 
-def _load_vix(vix_daily, session_date, session_complete) -> dict:
-    """VIX level and its 20-day average, from the Yahoo daily bars in SQLite.
-
-    VIX comes down the Yahoo path with every other price on this page — it is
-    already in the fetch list via config/macro_config.json — rather than out of
-    FRED. This previously read data/fred/VIXCLS.csv, deleted along with the other
-    per-series CSVs, and so returned None on every run; the VIX row silently
-    vanished from Step 1.
-
-    Phase contract applies: before the close, only bars from prior sessions.
-    """
-    bars = _completed_bars(vix_daily) if session_complete else _prior_bars(vix_daily, session_date)
-    # Never read past the session being reported. VIX is fetched independently of
-    # the trading symbols, so it can be a session ahead of them — a backfill run
-    # for an old date especially.
-    if session_date:
-        bars = [b for b in bars if _bar_date(b) <= session_date]
+def _load_vix(bars, vix_hourly, session_date):
+    """VIX from closed daily bars, updated by the latest hourly print before
+    the window end. The 20-day average is closed daily only."""
     closes = [b[1]['close'] for b in bars if b[1].get('close') is not None]
     if not closes:
         return None
-
-    current = closes[-1]
+    current, as_of = closes[-1], _bar_date(bars[-1]).isoformat()
+    today = [p for p in vix_hourly if bar_session_date(p[0]) == session_date]
+    if today:
+        current = today[-1][1]['close']
+        as_of = f"{session_date.isoformat()} {_bar_end(today[-1], ONE_HOUR):%H:%M}"
     avg_20d = sum(closes[-20:]) / min(20, len(closes))
     return {'current': round(current, 2), 'avg_20d': round(avg_20d, 2),
             'ratio': round(current / avg_20d, 2) if avg_20d else None,
-            'as_of': _bar_date(bars[-1]).isoformat()}
+            'as_of': as_of}
 
 
-def _compute_alignment_score(regime_symbols, hourly_data, target_date) -> tuple:
-    """Score whether the regime symbols (SPY/QQQ/IWM) moved the same direction
-    today. Uses today's RTH session bars only — before this filter the function
-    took the first→last bar of the whole ~30-day hourly window and reported
-    the monthly trend, which is not what "today's index alignment" means.
-    """
+def _compute_expansion_evidence(prior, bars_cut, session_date, window_end):
+    """Is the tape expanding, judged from the premarket range and the gap to
+    the last print? ATR-14 alone can't answer this: it's a 14-day average."""
+    pm = _compute_premarket_metrics(bars_cut, session_date, window_end)
+    pm_ratio = pm['range'].get('ratio') if pm.get('has_range') else None
+    gap_ratio = None
+    if prior:
+        gap = _classify_gap(_last_print(bars_cut, session_date),
+                            prior[-1][1]['close'], _median_gap(prior))
+        gap_ratio = gap['gap_ratio']
+    expanding = (pm_ratio is not None and pm_ratio >= 1.0) or \
+                (gap_ratio is not None and gap_ratio >= 1.5)
+    return {'expanding': expanding, 'basis': 'premarket',
+            'pm_range_ratio': pm_ratio, 'gap_ratio': gap_ratio}
+
+
+def _detect_regime(spy_prior, expansion, regime_config):
+    """Regime = daily trend (SPY vs MA20 and its slope) + ATR trend, from
+    closed daily bars only. Index alignment is the opening-range stage's."""
+    label, direction = 'Ranging', 'sideways'
+    if len(spy_prior) >= 20:
+        ma20 = _calculate_moving_average(spy_prior, 20)
+        if len(ma20) >= 10:
+            ma20_now, ma20_ten = ma20[-1][1], ma20[-10][1]
+            close = spy_prior[-1][1]['close']
+            if close > ma20_now and ma20_now > ma20_ten: label, direction = 'Trending', 'up'
+            elif close < ma20_now and ma20_now < ma20_ten: label, direction = 'Trending', 'down'
+
+    atr_trend = 'normal'
+    atr_vals = _calculate_atr(spy_prior, 14)
+    if len(atr_vals) >= 20:
+        atr_now = atr_vals[-1][1]
+        atr_avg = sum(a[1] for a in atr_vals[-20:]) / 20
+        if atr_now > atr_avg * 1.1:   atr_trend = 'expanding'
+        elif atr_now < atr_avg * 0.9: atr_trend = 'contracting'
+
+    day_type = _classify_day_type(spy_prior) if len(spy_prior) >= 3 else 'normal'
+
+    # "Choppy" means a sideways tape with a shrinking range. Any premarket
+    # evidence of expansion, or an outside bar, disqualifies it.
+    expanding = bool(expansion and expansion.get('expanding'))
+    if label == 'Ranging' and atr_trend == 'contracting' \
+            and day_type != 'outside' and not expanding:
+        label, direction = 'Choppy', 'mixed'
+
+    favored = (regime_config or {}).get(label, {})
+    return {'label': label, 'direction': direction, 'atr_trend': atr_trend,
+            'day_type': day_type, 'expansion': expansion or {},
+            'favored': {'patterns': list(favored.get('patterns', [])),
+                        'note': favored.get('note', '')}}
+
+
+_STRUCTURE_SESSIONS = 5
+
+
+def _structure_check(daily_direction, hourly_cut):
+    """Hourly structure over the last few sessions, as a cross-check on the
+    daily trend. Flags a contradiction when they point opposite ways."""
+    dates = sorted({bar_session_date(ts) for ts, _ in hourly_cut})[-_STRUCTURE_SESSIONS:]
+    if not dates:
+        return {'hourly': None, 'hourly_direction': None, 'daily_direction': daily_direction,
+                'contradicts': False}
+    closes = [(ts, b['close']) for ts, b in hourly_cut if bar_session_date(ts) >= dates[0]]
+    label, _, _, _ = classify_structure(closes)
+    hourly_dir = 'up' if '↗' in label else 'down' if '↘' in label else 'sideways'
+    contradicts = {daily_direction, hourly_dir} == {'up', 'down'}
+    return {'hourly': label, 'hourly_direction': hourly_dir,
+            'daily_direction': daily_direction, 'contradicts': contradicts,
+            'sessions': len(dates)}
+
+
+def _grade_day_quality(prior, bars_cut, session_date, window_end, regime_label, adr_8d, adr_20d):
+    """Pre-open day grade, 0-8. Index alignment is not known until the opening
+    range, so its factor is held at the neutral 1."""
+    if len(prior) < 2:
+        return 'B', {'total': 4, 'max': 8, 'has_data': False}
+    prior_close = prior[-1][1]['close']
+
+    # Factor 1: gap (prior close → last print before the window_end) + premarket range
+    pm = _compute_premarket_metrics(bars_cut, session_date, window_end)
+    has_pm_range = pm.get('has_range') and (pm['range'].get('ratio') or 0) >= 0.7
+    median_gap = _median_gap(prior)
+    last_print = _last_print(bars_cut, session_date)
+    gap = _classify_gap(last_print, prior_close, median_gap)
+    has_gap = gap['gap_significant']
+    gap_range_score = 2 if (has_gap and has_pm_range) else 1 if (has_gap or has_pm_range) else 0
+
+    # Factor 2: structure
+    structure_score = {'Trending': 2, 'Ranging': 1, 'Choppy': 0}.get(regime_label, 1)
+
+    # Factor 3: intraday range trend (8d vs 20d high-low)
+    adr_ratio = (adr_8d / adr_20d) if (adr_8d and adr_20d) else 1.0
+    adr_score = 2 if adr_ratio > 1.1 else 1 if adr_ratio >= 0.9 else 0
+
+    # Factor 4: index alignment — neutral until the opening-range stage
+    alignment_score = 1
+
+    total = gap_range_score + structure_score + adr_score + alignment_score
+    grade = 'A+' if total >= 7 else 'A' if total >= 5 else 'B' if total >= 3 else 'C'
+
+    scores = {
+        'total': total, 'max': 8,
+        'gap_range': {
+            'score': gap_range_score, 'has_gap': has_gap, 'has_pm_range': has_pm_range,
+            'gap_pts': abs(gap['gap_pts']) if gap['gap_pts'] is not None else 0.0,
+            'gap_ratio': gap['gap_ratio'] or 0.0,
+            'gap_signed': gap['gap_pts'], 'gap_pct': gap['gap_pct'],
+            'median_gap': round(median_gap, 2), 'prior_close': round(prior_close, 2),
+            'last_print': round(last_print, 2) if last_print is not None else None,
+            'pm_range_ratio': pm['range'].get('ratio'),
+            'pm_range_today': pm['range'].get('pm_range_today'),
+            'pm_range_avg_20d': pm['range'].get('pm_range_avg_20d'),
+        },
+        'structure': {'score': structure_score, 'regime': regime_label,
+                      'day_type': _classify_day_type(prior)},
+        'adr': {'score': adr_score, 'adr_8d': adr_8d, 'adr_20d': adr_20d, 'ratio': round(adr_ratio, 2)},
+        'alignment': {'score': alignment_score, 'stage': 'opening_range'},
+        'has_data': pm.get('has_data', False),
+    }
+    return grade, scores
+
+
+def _classify_vol_regime(prior, atr_current):
+    atr_vals   = _calculate_atr(prior, 14)
+    atr_series = [v[1] for v in atr_vals[:-1]]
+    lookback   = atr_series[-252:] if len(atr_series) >= 252 else atr_series
+    pct = _percentile_rank(lookback, atr_current)
+    if pct > 85:   label = 'Extreme'
+    elif pct > 60: label = 'Elevated'
+    elif pct >= 25: label = 'Normal'
+    else:           label = 'Low'
+    return {'label': label, 'atr_percentile_1y': pct}
+
+
+def _prior_intraday(bars, session_date):
+    """Intraday bars from sessions before session_date."""
+    return [p for p in bars if bar_session_date(p[0]) < session_date]
+
+
+def _premarket_indicators(prior, hourly, bars_cut, session_date, window_end):
+    """Indicator values as they stood at the premarket window_end: closed daily
+    bars, prior-session hourly bars, and the premarket window."""
+    if not prior:
+        return None
+    last      = prior[-1][1]
+    rsi_vals  = _calculate_rsi(prior, 14)
+    macd      = _calculate_macd(prior)
+    ma20_vals = _calculate_moving_average(prior, 20)
+    vols      = [p[1]['volume'] for p in prior[-20:]]
+    vol_20d   = sum(vols) / len(vols) if vols else 0
+    macd_hist = (macd['line'][-1][1] - macd['signal'][-1][1]) \
+                if macd['line'] and macd['signal'] else 0.0
+    atr_prior, atr_prior_avg = _atr_prior(prior)
+
+    pm = _compute_premarket_metrics(bars_cut, session_date, window_end) if bars_cut else None
+    pm_range_active = (pm['range']['ratio'] >= 0.7) if (pm and pm.get('has_range')) \
+                      else (atr_prior > atr_prior_avg)
+
+    prior_hourly = _prior_intraday(hourly, session_date)
+    squeeze = _calculate_squeeze(prior_hourly) if prior_hourly else \
+              {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
+    rsi_div = _calculate_rsi_divergence(prior_hourly) if prior_hourly else \
+              {'signal': 'unknown', 'description': 'No hourly data'}
+
+    return {
+        'prior_close':      round(last['close'], 2),
+        'rsi_14':           round(rsi_vals[-1][1], 1) if rsi_vals else 50.0,
+        'macd_histogram':   round(macd_hist, 4),
+        'above_ma_20':      last['close'] > (ma20_vals[-1][1] if ma20_vals else last['close']),
+        'volume_above_20d': last['volume'] > vol_20d if vol_20d > 0 else False,
+        'pm_range_active':  pm_range_active,
+        'squeeze':          squeeze,
+        'rsi_divergence':   rsi_div,
+        'atr_14':           round(atr_prior, 2),
+        'atr_20d_avg':      round(atr_prior_avg, 2),
+    }
+
+
+def _pattern_keys(keys, favored_patterns):
+    """Stamp a pattern with its component keys and whether they fit the regime."""
+    return {'keys': list(keys),
+            'regime_match': bool(set(keys) & set(favored_patterns or []))}
+
+
+def _watchlist(symbol, prior, gap, last_print, atr, regime, targets_config):
+    """Setups known at the premarket window end: gaps to the last print, and
+    engulfing / outside day on the last closed bar."""
+    favored = regime.get('favored', {}).get('patterns', [])
+    t1_atr, t2_atr = targets_config['t1_atr'], targets_config['t2_atr']
+    out = []
+    last = prior[-1][1]
+
+    if gap['gap_significant'] and gap['gap_type'] != 'none':
+        is_up = gap['gap_type'] == 'up'
+        mult  = 1 if is_up else -1
+        prior_close = round(last['close'], 2)
+        ratio_str = f"{gap['gap_ratio']:.1f}× median" if gap['gap_ratio'] is not None else ""
+        notes = f"Gap {gap['gap_pct']:+.2f}% · {abs(gap['gap_pts']):.2f} pts · {ratio_str} · {regime['label']}"
+        if gap['gap_strong'] and regime['label'] == 'Trending':
+            out.append({
+                'symbol': symbol, 'pattern': 'Gap Continuation', 'direction': gap['gap_type'],
+                'notes': notes,
+                'levels': {'prev_close': prior_close, 'last_print': round(last_print, 2),
+                           't1_continuation': round(last_print + t1_atr * atr * mult, 2),
+                           't2_continuation': round(last_print + t2_atr * atr * mult, 2),
+                           'atr': round(atr, 2)},
+                **_pattern_keys(['gap_continuation'], favored),
+            })
+        else:
+            out.append({
+                'symbol': symbol, 'pattern': 'Gap Fill', 'direction': 'down' if is_up else 'up',
+                'notes': notes,
+                'levels': {'prev_close': prior_close, 'last_print': round(last_print, 2),
+                           'fill_target': prior_close, 'atr': round(atr, 2)},
+                **_pattern_keys(['gap_fill'], favored),
+            })
+
+    vols = [p[1]['volume'] for p in prior[-20:]]
+    engulfing = _detect_engulfing(prior, sum(vols) / len(vols) if vols else 0)
+    if engulfing in ('bullish', 'bearish'):
+        is_up = engulfing == 'bullish'
+        mult  = 1 if is_up else -1
+        entry = round(last['high'] if is_up else last['low'], 2)
+        out.append({
+            'symbol': symbol, 'pattern': 'Engulfing', 'direction': 'up' if is_up else 'down',
+            'notes': f"{'Bullish' if is_up else 'Bearish'} engulfing, vol confirmed",
+            'levels': {'entry': entry, 'stop': round(last['low'] if is_up else last['high'], 2),
+                       't1': round(entry + t1_atr * atr * mult, 2),
+                       't2': round(entry + t2_atr * atr * mult, 2), 'atr': round(atr, 2)},
+            **_pattern_keys(['engulfing'], favored),
+        })
+
+    od = _detect_outside_day(prior)
+    if od in ('up', 'down'):
+        is_up = od == 'up'
+        mult  = 1 if is_up else -1
+        entry = round(last['high'] if is_up else last['low'], 2)
+        od_range = last['high'] - last['low']
+        out.append({
+            'symbol': symbol, 'pattern': 'Outside Day', 'direction': od,
+            'notes': f"Close {'upper' if is_up else 'lower'} 25%: {last['close']:.2f}",
+            'levels': {'entry': entry, 'stop': round(last['low'] if is_up else last['high'], 2),
+                       't1': round(entry + 1.5 * od_range * mult, 2),
+                       'range_size': round(od_range, 2), 'atr': round(atr, 2)},
+            **_pattern_keys(['outside_day'], favored),
+        })
+    return out
+
+
+def _stage_premarket(cfg, stage, S, series, sections):
+    window_end = stage.window_end
+    spy = series[REFERENCE_SYMBOL]
+    spy_prior = spy.daily
+    spy_cut   = spy.five_min
+
+    expansion = _compute_expansion_evidence(spy_prior, spy_cut, S, window_end)
+    regime = _detect_regime(spy_prior, expansion, cfg.regimes)
+    structure = _structure_check(regime['direction'], spy.hourly)
+
+    section = {
+        'window_end': f"{window_end:%H:%M}",
+        'regime': regime,
+        'structure_check': structure,
+        'vix': _load_vix(series['VIX'].daily, series['VIX'].hourly, S) if 'VIX' in series else None,
+        'symbols': {},
+        'watchlist': [],
+    }
+
+    for symbol in cfg.symbols:
+        sym = series.get(symbol)
+        prior = sym.daily if sym else []
+        if len(prior) < 2:
+            continue
+        bars_cut = sym.five_min
+        atr, atr_avg = _atr_prior(prior)
+        prior_close = prior[-1][1]['close']
+        last_print = _last_print(bars_cut, S)
+        gap = _classify_gap(last_print, prior_close, _median_gap(prior))
+        pm_bars = _window(bars_cut, S, PREMARKET_START, window_end)
+        ranges = [p[1]['high'] - p[1]['low'] for p in prior if p[1]['high'] and p[1]['low']]
+        adr_20d = round(sum(ranges[-20:]) / min(20, len(ranges)), 2) if ranges else None
+        adr_8d  = round(sum(ranges[-8:])  / min(8,  len(ranges)), 2) if ranges else None
+
+        section['symbols'][symbol] = {
+            'prior_date':  _bar_date(prior[-1]).isoformat(),
+            'prior_close': round(prior_close, 2),
+            'last_print':  round(last_print, 2) if last_print is not None else None,
+            'gap': {**gap, 'median_overnight_gap': round(_median_gap(prior), 2)},
+            'premarket': {
+                'high': round(max(b[1]['high'] for b in pm_bars), 2) if pm_bars else None,
+                'low':  round(min(b[1]['low']  for b in pm_bars), 2) if pm_bars else None,
+                'last': round(pm_bars[-1][1]['close'], 2)             if pm_bars else None,
+            },
+            'adr_20d': adr_20d, 'adr_8d': adr_8d,
+            'prev_range': round(ranges[-1], 2) if ranges else None,
+            'day_type': _classify_day_type(prior),
+            'preopen': _premarket_indicators(prior, sym.hourly,
+                                             bars_cut, S, window_end),
+        }
+        section['watchlist'] += _watchlist(symbol, prior, gap, last_print, atr,
+                                           regime, cfg.targets)
+
+        if symbol == 'SPY':
+            grade, scores = _grade_day_quality(prior, bars_cut, S, window_end, regime['label'],
+                                               adr_8d, adr_20d)
+            section['day_quality'] = {
+                'grade': grade, 'scores': scores,
+                'posture_factor': cfg.sizing['day_posture'].get(grade, 1.0),
+            }
+            section['vol_regime'] = _classify_vol_regime(prior, atr)
+    return section
+
+
+# ------------------------------------------------------------------
+# Open stage
+# ------------------------------------------------------------------
+
+def _stage_open(cfg, stage, S, series, sections):
+    """The first 5-min bar and the gap it opened on. Recorded for later
+    assessment — no targets."""
+    window_end = stage.window_end
+    section = {'window_end': f"{window_end:%H:%M}", 'symbols': {}}
+    for symbol in cfg.symbols:
+        sym = series.get(symbol)
+        prior = sym.daily if sym else []
+        rth = _window(sym.five_min, S, RTH_OPEN, window_end) if sym else []
+        if len(prior) < 2 or not rth:
+            continue
+        prior_close = prior[-1][1]['close']
+        o = rth[0][1]['open']
+        h = max(b[1]['high'] for b in rth)
+        l = min(b[1]['low']  for b in rth)
+        c = rth[-1][1]['close']
+        gap = _classify_gap(o, prior_close, _median_gap(prior))
+        if gap['gap_type'] == 'none':
+            first_bar, filled = None, False
+        else:
+            is_up = gap['gap_type'] == 'up'
+            toward = (c < o) if is_up else (c > o)
+            first_bar = 'flat' if c == o else ('toward_fill' if toward else 'with_gap')
+            filled = (l <= prior_close) if is_up else (h >= prior_close)
+        section['symbols'][symbol] = {
+            'bar': {'time': bar_clock(rth[0][0]), 'open': round(o, 2), 'high': round(h, 2),
+                    'low': round(l, 2), 'close': round(c, 2)},
+            'prior_close': round(prior_close, 2),
+            'gap': gap,
+            'first_bar': first_bar,
+            'filled_in_first_bar': filled,
+        }
+    return section
+
+
+# ------------------------------------------------------------------
+# Opening-range stage
+# ------------------------------------------------------------------
+
+def _compute_alignment(regime_symbols, series, session_date, window_end):
+    """Did SPY/QQQ/IWM move the same way from the open to the end of the
+    opening range? Scored 0-2 like the day-grade factor it completes."""
     directions = {}
     for sym in regime_symbols:
-        h = hourly_data.get(sym, [])
-        session = _get_session_bars(h, 930, 1600, target_date=target_date) if h else []
-        if len(session) >= 2:
-            chg = (session[-1][1]['close'] - session[0][1]['close']) / session[0][1]['close']
+        bars = _window(series[sym].five_min, session_date, RTH_OPEN, window_end) if sym in series else []
+        if bars and bars[0][1]['open']:
+            chg = bars[-1][1]['close'] / bars[0][1]['open'] - 1
             directions[sym] = 'up' if chg > 0.005 else 'down' if chg < -0.005 else 'flat'
     non_flat = [d for d in directions.values() if d != 'flat']
     if not non_flat:
@@ -500,149 +999,209 @@ def _compute_alignment_score(regime_symbols, hourly_data, target_date) -> tuple:
         majority = max(set(non_flat), key=non_flat.count)
         agree = non_flat.count(majority)
         score = 2 if agree == len(non_flat) else (1 if agree >= 2 else 0)
-    return score, directions
+    label = 'aligned' if score == 2 else 'diverging' if score == 0 else 'mixed'
+    return {'score': score, 'label': label, 'detail': directions}
 
 
-def _compute_expansion_evidence(points, bars_5m, session_date, session_complete):
-    """Is the tape expanding? Answered from whatever is legitimately known at
-    this phase — realized range once the session is done, premarket range and
-    gap size before it. ATR-14 alone can't answer this: it's a 14-day average,
-    so it still reads "contracting" on a day that doubles its recent range.
-    """
-    prior = _prior_bars(points, session_date)
-    atr_vals = _calculate_atr(prior, 14)
-    atr = atr_vals[-1][1] if atr_vals else 0.0
-
-    if session_complete:
-        bar = _session_bar(points, session_date)
-        if bar and atr > 0:
-            mult = (bar['high'] - bar['low']) / atr
-            return {'expanding': mult >= 1.0, 'basis': 'realized_range',
-                    'atr_multiple': round(mult, 2)}
-        return {'expanding': False, 'basis': 'no_data', 'atr_multiple': None}
-
-    pm = _compute_premarket_metrics(bars_5m, session_date)
-    pm_ratio = pm['range'].get('ratio') if pm.get('has_range') else None
-
-    gap_ratio = None
-    if prior:
-        prior_close = prior[-1][1]['close']
-        hist_gaps = [abs(prior[i][1]['open'] - prior[i-1][1]['close'])
-                     for i in range(max(1, len(prior) - 20), len(prior))]
-        median_gap = statistics.median(hist_gaps) if hist_gaps else 0.0
-        est_open = _estimate_open(bars_5m, session_date)
-        if est_open is not None and median_gap > 0:
-            gap_ratio = round(abs(est_open - prior_close) / median_gap, 2)
-
-    expanding = (pm_ratio is not None and pm_ratio >= 1.0) or \
-                (gap_ratio is not None and gap_ratio >= 1.5)
-    return {'expanding': expanding, 'basis': 'premarket',
-            'pm_range_ratio': pm_ratio, 'gap_ratio': gap_ratio}
+CONFLUENCE_MAX = 8
 
 
-def _estimate_open(bars_5m, session_date):
-    """Session open if RTH has started, else the last premarket print."""
-    if not bars_5m or session_date is None:
+def _score_confluence(direction, pm, day_grade, regime_match):
+    """Confluence score, 0-8, from premarket-stage inputs."""
+    if pm is None:
         return None
-    last_pm = None
-    for ts, ohlcv in bars_5m:
-        if bar_session_date(ts) != session_date:
-            continue
-        hhmm = bar_minutes(ts)
-        if hhmm == _RTH_OPEN_HHMM:
-            return ohlcv['open']
-        if hhmm < _RTH_OPEN_HHMM:
-            last_pm = ohlcv['close']
-    return last_pm
-
-
-def _grade_day_quality(points, hourly_points, target_date, regime_label,
-                       adr_8d=None, adr_20d=None, alignment_score=1, alignment_detail=None):
-    if len(points) < 2:
-        return 'B', {'total': 4, 'max': 8, 'has_data': False}
-    prior_close = points[-1][1]['close']
-
-    # Factor 1: Gap + Overnight Range (combined)
-    pm = _compute_premarket_metrics(hourly_points, target_date)
-    has_pm_range = pm.get('has_range') and (pm['range'].get('ratio') or 0) >= 0.7
-    hist_gaps = [abs(points[i][1]['open'] - points[i-1][1]['close'])
-                 for i in range(max(1, len(points) - 20), len(points))]
-    median_gap = statistics.median(hist_gaps) if hist_gaps else 0.0
-    est_open = None
-    for ts, ohlcv in hourly_points:
-        if bar_session_date(ts) == target_date and bar_minutes(ts) == 930:
-            est_open = ohlcv['open']
-            break
-    if est_open is None:
-        for ts, ohlcv in hourly_points:
-            if bar_session_date(ts) == target_date:
-                est_open = ohlcv['open']
-                break
-    gap_pts   = abs(est_open - prior_close) if est_open is not None else 0.0
-    gap_ratio = round(gap_pts / median_gap, 2) if median_gap > 0 else 0.0
-    # Signed, because direction drives the arrow and colour on the page — which
-    # was subtracting est_open from prior_close itself. `gap_pts` above stays
-    # unsigned since the ratio and the score only care about magnitude.
-    gap_signed = round(est_open - prior_close, 2) if est_open is not None else None
-    gap_pct    = round(gap_signed / prior_close * 100, 2) \
-                 if (gap_signed is not None and prior_close) else None
-    has_gap   = gap_ratio >= 0.5
-    gap_range_score = 2 if (has_gap and has_pm_range) else 1 if (has_gap or has_pm_range) else 0
-
-    # Factor 2: Structure
-    structure_score = {'Trending': 2, 'Ranging': 1, 'Choppy': 0}.get(regime_label, 1)
-    day_type = _classify_day_type(points)
-
-    # Factor 3: Intraday range trend (8d vs 20d high-low, gap-excluded). The
-    # overnight gap is scored separately in gap_range, so this factor isolates
-    # intraday follow-through — a gap day with a tight tape reads as compressed.
-    # The 8-day recent window (~two weeks) tracks the current regime more closely
-    # than a 5-day window while staying less noisy.
-    adr_ratio = (adr_8d / adr_20d) if (adr_8d and adr_20d) else 1.0
-    adr_score = 2 if adr_ratio > 1.1 else 1 if adr_ratio >= 0.9 else 0
-
-    # Factor 4: Index Alignment (pre-computed)
-    total = gap_range_score + structure_score + adr_score + alignment_score
-    grade = 'A+' if total >= 7 else 'A' if total >= 5 else 'B' if total >= 3 else 'C'
-
-    scores = {
-        'total': total, 'max': 8,
-        'gap_range': {
-            'score': gap_range_score, 'has_gap': has_gap, 'has_pm_range': has_pm_range,
-            'gap_pts': round(gap_pts, 2), 'gap_ratio': gap_ratio,
-            'gap_signed': gap_signed, 'gap_pct': gap_pct,
-            'median_gap': round(median_gap, 2), 'prior_close': round(prior_close, 2),
-            'est_open': round(est_open, 2) if est_open is not None else None,
-            'pm_range_ratio': pm['range'].get('ratio'),
-            'pm_range_today': pm['range'].get('pm_range_today'),
-            'pm_range_avg_20d': pm['range'].get('pm_range_avg_20d'),
-        },
-        'structure': {'score': structure_score, 'regime': regime_label, 'day_type': day_type},
-        'adr': {'score': adr_score, 'adr_8d': adr_8d, 'adr_20d': adr_20d, 'ratio': round(adr_ratio, 2)},
-        'alignment': {'score': alignment_score, 'detail': alignment_detail or {}},
-        'has_data': pm.get('has_data', False),
+    is_up   = direction == 'up'
+    squeeze = pm['squeeze']
+    checks = {
+        'Volume > 20d avg (daily)': bool(pm['volume_above_20d']),
+        'PM range active':          bool(pm['pm_range_active']),
+        'RSI extreme (daily)':      pm['rsi_14'] < 35 or pm['rsi_14'] > 65,
+        'MACD aligned (daily)':     pm['macd_histogram'] > 0 if is_up else pm['macd_histogram'] < 0,
+        'MA(20) aligned (daily)':   bool(pm['above_ma_20']) if is_up else not pm['above_ma_20'],
+        'Day A or A+':              day_grade in ('A', 'A+'),
+        'Regime matches':           bool(regime_match),
+        'Squeeze aligned (hourly)': squeeze['status'] not in ('none', 'unknown') and
+                                    (squeeze['momentum_increasing'] is True if is_up
+                                     else squeeze['momentum_increasing'] is False),
     }
-    return grade, scores
+    return {'score': sum(1 for v in checks.values() if v),
+            'max': CONFLUENCE_MAX,
+            'checks': checks}
 
 
-def _grade_realized(points, session_date, eod_outcome, forecast_grade, forecast_total):
-    """What the session actually delivered, scored on the same 0-8 scale as the
-    pre-open forecast so the two are directly comparable. EOD only — this is the
-    one block allowed to look at the session it describes.
-    """
-    bar = _session_bar(points, session_date)
-    if not bar:
-        return {}
-    prior = _prior_bars(points, session_date)
-    atr_vals = _calculate_atr(prior, 14)
-    atr = atr_vals[-1][1] if atr_vals else 0.0
+def _size_trade(day_grade, score, sizing_config):
+    """Position size as a percentage of normal: day posture × confluence tier."""
+    day_factor = sizing_config['day_posture'].get(day_grade, 1.0)
+    conf_factor, tier_label = 0.0, None
+    for tier in sizing_config['confluence_tiers']:
+        if score >= tier['min']:
+            conf_factor, tier_label = tier['factor'], tier['label']
+            break
+    return {
+        'day_factor':        day_factor,
+        'confluence_factor': conf_factor,
+        'effective_pct':     round(day_factor * conf_factor * 100, 1),
+        'tier_label':        tier_label,
+    }
+
+
+def _plan_levels(direction, entry, atr, targets_config):
+    """Stop and targets as ATR multiples off an entry. Distances are emitted
+    even when there is no fixed entry."""
+    mult = 1 if direction == 'up' else -1
+    plan = {
+        'stop_atr': targets_config['stop_atr'],
+        't1_atr':   targets_config['t1_atr'],
+        't2_atr':   targets_config['t2_atr'],
+        'stop_distance': round(targets_config['stop_atr'] * atr, 2),
+        't1_distance':   round(targets_config['t1_atr']   * atr, 2),
+        't2_distance':   round(targets_config['t2_atr']   * atr, 2),
+        'entry': None, 'stop': None, 't1': None, 't2': None,
+    }
+    if entry is not None:
+        plan.update({
+            'entry': round(entry, 2),
+            'stop':  round(entry - mult * targets_config['stop_atr'] * atr, 2),
+            't1':    round(entry + mult * targets_config['t1_atr']   * atr, 2),
+            't2':    round(entry + mult * targets_config['t2_atr']   * atr, 2),
+        })
+    return plan
+
+
+def _stage_opening_range(cfg, stage, S, series, sections):
+    window_end = stage.window_end
+    premarket = sections['premarket']
+    targets = cfg.targets
+    sizing  = cfg.sizing
+    favored = premarket['regime'].get('favored', {}).get('patterns', [])
+    grade   = premarket.get('day_quality', {}).get('grade')
+
+    section = {
+        'window_end': f"{window_end:%H:%M}",
+        'minutes': int((market_datetime(S, window_end) - market_datetime(S, RTH_OPEN)) / timedelta(minutes=1)),
+        'alignment': _compute_alignment(cfg.regime_symbols, series, S, window_end),
+        'symbols': {},
+        'patterns': [],
+    }
+    patterns = [dict(p) for p in premarket.get('watchlist', [])]
+
+    for symbol in cfg.symbols:
+        pre = premarket['symbols'].get(symbol)
+        rth = _window(series[symbol].five_min, S, RTH_OPEN, window_end) if symbol in series else []
+        if not pre or not rth:
+            continue
+        atr     = pre['preopen']['atr_14']
+        atr_avg = pre['preopen']['atr_20d_avg']
+        hi = max(b[1]['high'] for b in rth)
+        lo = min(b[1]['low']  for b in rth)
+        rng = hi - lo
+        qualified = rng > 0.75 * atr_avg if atr_avg else False
+        levels = {
+            'or_high': round(hi, 2), 'or_low': round(lo, 2),
+            't1_up':   round(hi + targets['t1_atr'] * atr, 2),
+            't2_up':   round(hi + targets['t2_atr'] * atr, 2),
+            't1_down': round(lo - targets['t1_atr'] * atr, 2),
+            't2_down': round(lo - targets['t2_atr'] * atr, 2),
+            'atr': atr,
+        }
+        section['symbols'][symbol] = {'high': levels['or_high'], 'low': levels['or_low'],
+                                      'range': round(rng, 2), 'qualified': qualified,
+                                      'levels': levels}
+        if qualified:
+            patterns.append({
+                'symbol': symbol, 'pattern': 'ORB', 'direction': 'watch',
+                'notes': f"Range {rng:.2f} > 0.75× ATR avg {atr_avg:.2f}",
+                'levels': levels,
+                **_pattern_keys(['orb'], favored),
+            })
+
+    for p in patterns:
+        pre = premarket['symbols'].get(p['symbol'], {}).get('preopen')
+        conf = _score_confluence(p['direction'], pre, grade, p.get('regime_match'))
+        if not conf:
+            continue
+        p['confluence'] = conf
+        p['qualifies']  = conf['score'] >= sizing['min_confluence']
+        p['sizing']     = _size_trade(grade, conf['score'], sizing)
+        entry = (p.get('levels') or {}).get('entry')
+        p['plan'] = _plan_levels(p['direction'], entry if isinstance(entry, (int, float)) else None,
+                                 pre['atr_14'], targets)
+    section['patterns'] = patterns
+    return section
+
+
+# ------------------------------------------------------------------
+# Recap stage
+# ------------------------------------------------------------------
+
+def _resolve_levels(bar, is_up, entry, stop, t1, t2=None):
+    """Did a setup trigger, stop out, and reach its targets within `bar`?"""
+    hi, lo = bar['high'], bar['low']
+    triggered = (hi >= entry) if is_up else (lo <= entry)
+    return {
+        'triggered': triggered,
+        'stop_hit':  triggered and ((lo <= stop) if is_up else (hi >= stop)),
+        'hit_t1':    triggered and ((hi >= t1) if is_up else (lo <= t1)),
+        'hit_t2':    triggered and (t2 is not None) and ((hi >= t2) if is_up else (lo <= t2)),
+    }
+
+
+def _resolve_pattern(p, bar, eod):
+    lv = p.get('levels') or {}
+    name = p['pattern']
+    if name == 'Gap Fill':
+        return {'filled': eod['gap_filled']}
+    if name == 'Gap Continuation':
+        is_up = p['direction'] == 'up'
+        probe = bar['high'] if is_up else bar['low']
+        return {
+            'hit_t1_continuation': (probe >= lv['t1_continuation']) if is_up else (probe <= lv['t1_continuation']),
+            'hit_t2_continuation': (probe >= lv['t2_continuation']) if is_up else (probe <= lv['t2_continuation']),
+        }
+    if name == 'ORB':
+        return {'breached': eod['orb_breached'], 'direction': eod['orb_direction'],
+                'hit_t1': eod['orb_hit_t1']}
+    if name in ('Engulfing', 'Outside Day'):
+        return _resolve_levels(bar, p['direction'] == 'up', lv['entry'], lv['stop'],
+                               lv['t1'], lv.get('t2'))
+    return {}
+
+
+def _eod_outcome(bar, prior_close, atr, or_levels, t1_atr):
+    rng = bar['high'] - bar['low']
+    out = {
+        'day_range': round(rng, 2),
+        'day_range_pct': round(rng / bar['low'] * 100, 2) if bar['low'] else 0.0,
+        'day_atr_multiple': round(rng / atr, 2) if atr else 0.0,
+        'gap_filled': False,
+        'orb_high': None, 'orb_low': None, 'orb_breached_up': False, 'orb_breached_down': False,
+        'orb_breached': False, 'orb_direction': 'none', 'orb_hit_t1': False,
+    }
+    if bar['open'] > prior_close:
+        out['gap_filled'] = bar['low'] <= prior_close
+    elif bar['open'] < prior_close:
+        out['gap_filled'] = bar['high'] >= prior_close
+    if or_levels:
+        oh, ol = or_levels['or_high'], or_levels['or_low']
+        bu, bd = bar['high'] > oh, bar['low'] < ol
+        out.update({'orb_high': oh, 'orb_low': ol, 'orb_breached_up': bu,
+                    'orb_breached_down': bd, 'orb_breached': bu or bd})
+        if bu and bd:
+            out['orb_direction'] = 'up' if bar['close'] > (oh + ol) / 2 else 'down'
+        elif bu: out['orb_direction'] = 'up'
+        elif bd: out['orb_direction'] = 'down'
+        if atr:
+            out['orb_hit_t1'] = (bu and bar['high'] >= oh + t1_atr * atr) or \
+                                (bd and bar['low'] <= ol - t1_atr * atr)
+    return out
+
+
+def _grade_realized(bar, prior, eod_outcome, forecast_grade, forecast_total):
+    """What the session delivered, on the same 0-8 scale as the day grade."""
+    atr, _ = _atr_prior(prior)
     rng = bar['high'] - bar['low']
     atr_multiple = round(rng / atr, 2) if atr > 0 else None
-
-    # Where the close landed in the day's range: 1.0 = on the high, 0 = on the low.
     close_loc = round((bar['close'] - bar['low']) / rng, 2) if rng > 0 else 0.5
-    # A trend day both expands and closes near an extreme — the profile that
-    # actually pays, and the one the "Choppy" label was suppressing.
     trend_day = bool(atr_multiple and atr_multiple >= 1.0 and (close_loc >= 0.75 or close_loc <= 0.25))
 
     if atr_multiple is None:      expansion = 'unknown'
@@ -672,8 +1231,7 @@ def _grade_realized(points, session_date, eod_outcome, forecast_grade, forecast_
         'expansion': expansion,
         'close_location': close_loc,
         'trend_day': trend_day,
-        'day_type': _classify_day_type([p for p in points if _bar_date(p) <= session_date]
-                                       if session_date else points),
+        'day_type': _classify_day_type(prior + [(None, bar)]),
         'orb_breached': bool(eod_outcome.get('orb_breached')),
         'orb_hit_t1':   bool(eod_outcome.get('orb_hit_t1')),
         'gap_filled':   bool(eod_outcome.get('gap_filled')),
@@ -683,739 +1241,106 @@ def _grade_realized(points, session_date, eod_outcome, forecast_grade, forecast_
     }
 
 
-def _classify_vol_regime(points, atr_current):
-    atr_vals   = _calculate_atr(points, 14)
-    atr_series = [v[1] for v in atr_vals[:-1]]
-    lookback   = atr_series[-252:] if len(atr_series) >= 252 else atr_series
-    pct = _percentile_rank(lookback, atr_current)
-    if pct > 85:   label = 'Extreme'
-    elif pct > 60: label = 'Elevated'
-    elif pct >= 25: label = 'Normal'
-    else:           label = 'Low'
-    return {'label': label, 'atr_percentile_1y': pct}
+def _stage_recap(cfg, stage, S, series, sections):
+    """Each section's calls graded against the finished session."""
+    premarket, open_, opening_range = sections['premarket'], sections['open'], sections['opening_range']
+    if opening_range.get('status') == 'not_available':
+        opening_range = {}
+    t1_atr = cfg.targets['t1_atr']
+    section = {'symbols': {}, 'patterns': []}
 
+    for symbol in cfg.symbols:
+        bar = _session_bar(series[symbol].daily, S) if symbol in series else None
+        pre = premarket['symbols'].get(symbol)
+        if not (bar and pre):
+            continue
+        or_sym = (opening_range.get('symbols') or {}).get(symbol)
+        eod = _eod_outcome(bar, pre['prior_close'], pre['preopen']['atr_14'],
+                           or_sym['levels'] if or_sym else None, t1_atr)
+        entry = {'open': round(bar['open'], 2), 'high': round(bar['high'], 2),
+                 'low': round(bar['low'], 2), 'close': round(bar['close'], 2),
+                 'volume': bar['volume'], 'eod_outcome': eod}
+        open_sym = (open_.get('symbols') or {}).get(symbol)
+        if open_sym and open_sym['first_bar'] in ('toward_fill', 'with_gap'):
+            entry['first_bar_call'] = {'call': open_sym['first_bar'],
+                                       'correct': (open_sym['first_bar'] == 'toward_fill') == eod['gap_filled']}
+        section['symbols'][symbol] = entry
 
-def _detect_regime(symbols, daily_data, hourly_data, session_date=None,
-                   session_complete=False, expansion=None, regime_config=None):
-    # Index divergence sets the alignment flag only — it no longer forces "Choppy".
-    # The penalty for divergence is already applied separately via _compute_alignment_score.
-    aligned = True
-    first_dir = None
-    for sym in symbols:
-        pts = hourly_data.get(sym, [])
-        if pts:
-            change = (pts[-1][1]['close'] - pts[0][1]['close']) / pts[0][1]['close']
-            curr_dir = 'up' if change > 0.005 else 'down' if change < -0.005 else 'flat'
-            if first_dir is None:
-                first_dir = curr_dir
-            elif curr_dir != first_dir and curr_dir != 'flat' and first_dir != 'flat':
-                aligned = False
-                break
-    index_alignment = 'aligned' if aligned else 'diverging'
+    spy = section['symbols'].get('SPY')
+    if spy:
+        dq = premarket.get('day_quality', {})
+        section['day_realized'] = _grade_realized(
+            _session_bar(series['SPY'].daily, S), _prior_bars(series['SPY'].daily, S),
+            spy['eod_outcome'],
+            dq.get('grade'), dq.get('scores', {}).get('total'))
 
-    # Always derive structure from SPY's MA20 position + slope. Anchored to the
-    # last *completed* session so the label doesn't flip between the morning and
-    # post-close runs just because Yahoo opened today's bar in between.
-    label, direction = 'Ranging', 'sideways'
-    spy_points = _completed_bars(daily_data.get('SPY', []))
-    if len(spy_points) >= 20:
-        ma20 = _calculate_moving_average(spy_points, 20)
-        if len(ma20) >= 10:
-            ma20_now = ma20[-1][1]
-            ma20_ten = ma20[-10][1]
-            close = spy_points[-1][1]['close']
-            if close > ma20_now and ma20_now > ma20_ten: label, direction = 'Trending', 'up'
-            elif close < ma20_now and ma20_now < ma20_ten: label, direction = 'Trending', 'down'
-
-    # Always compute ATR trend (expanding / contracting / normal).
-    atr_trend = 'normal'
-    if spy_points:
-        atr_vals = _calculate_atr(spy_points, 14)
-        if len(atr_vals) >= 20:
-            atr_now = atr_vals[-1][1]
-            atr_avg = sum(a[1] for a in atr_vals[-20:]) / 20
-            if atr_now > atr_avg * 1.1:   atr_trend = 'expanding'
-            elif atr_now < atr_avg * 0.9: atr_trend = 'contracting'
-
-    # Structure of the last completed bar. spy_points is already trimmed to
-    # completed sessions, so [-1] is the right bar in every phase.
-    day_type = _classify_day_type(spy_points) if len(spy_points) >= 3 else 'normal'
-
-    # "Choppy" means a genuinely sideways tape with a shrinking range — not
-    # merely that ATR-14, a two-week average, is below its own 20-day mean. Any
-    # live evidence of expansion (an outside bar, a wide premarket, an outsized
-    # gap, or a realized range >= 1x ATR) disqualifies the chop label.
-    expanding = bool(expansion and expansion.get('expanding'))
-    if label == 'Ranging' and atr_trend == 'contracting' \
-            and day_type != 'outside' and not expanding:
-        label, direction = 'Choppy', 'mixed'
-
-    favored = (regime_config or {}).get(label, {})
-    return {'label': label, 'direction': direction, 'atr_trend': atr_trend,
-            'index_alignment': index_alignment, 'day_type': day_type,
-            'expansion': expansion or {},
-            'favored': {'patterns': list(favored.get('patterns', [])),
-                        'note': favored.get('note', '')}}
-
-
-def _pattern_keys(keys, favored_patterns):
-    """Stamp a pattern with its component keys and whether they fit the regime.
-
-    Keys are composed from what the generator actually built, so the page never
-    has to parse the display string — that string-matching is exactly what let
-    'Engulfing at S/R' silently fail to match the emitted 'Engulfing'.
-    """
-    return {'keys': list(keys),
-            'regime_match': bool(set(keys) & set(favored_patterns or []))}
-
-
-def _resolve_prior_setups(daily_points):
-    """Detect Engulfing/Outside Day setups on the second-to-last bar and resolve
-    against the last bar's high/low. `points[-2]` fires the setup, `points[-1]`
-    is the execution session ("next session" from the setup's perspective).
-
-    Emits per-pattern: entry, stop, t1, (t2), triggered, stop_hit, hit_t1, hit_t2.
-    Returns [] if there aren't enough bars or no next-day pattern fired.
-    """
-    if len(daily_points) < 3:
-        return []
-    prior_slice   = daily_points[:-1]
-    setup_bar     = daily_points[-2][1]
-    execution_bar = daily_points[-1][1]
-
-    prior_atr_vals = _calculate_atr(prior_slice, 14)
-    prior_atr = prior_atr_vals[-1][1] if prior_atr_vals else 0.0
-    prior_vols = [p[1]['volume'] for p in prior_slice[-20:]]
-    prior_vol_20d = sum(prior_vols) / len(prior_vols) if prior_vols else 0
-
-    resolutions = []
-
-    def _resolve(is_up, entry, stop, t1, t2=None):
-        hi, lo = execution_bar['high'], execution_bar['low']
-        triggered = (hi >= entry) if is_up else (lo <= entry)
-        stop_hit  = triggered and ((lo <= stop) if is_up else (hi >= stop))
-        hit_t1    = triggered and ((hi >= t1) if is_up else (lo <= t1))
-        hit_t2    = triggered and (t2 is not None) and ((hi >= t2) if is_up else (lo <= t2))
-        return {'triggered': triggered, 'stop_hit': stop_hit, 'hit_t1': hit_t1, 'hit_t2': hit_t2}
-
-    eng = _detect_engulfing(prior_slice, prior_vol_20d)
-    if eng in ['bullish', 'bearish'] and prior_atr > 0:
-        is_up = eng == 'bullish'
-        mult  = 1 if is_up else -1
-        entry = round(setup_bar['high'] if is_up else setup_bar['low'], 2)
-        stop  = round(setup_bar['low']  if is_up else setup_bar['high'], 2)
-        t1    = round(entry + 1.5 * prior_atr * mult, 2)
-        t2    = round(entry + 2.0 * prior_atr * mult, 2)
-        resolutions.append({
-            'pattern': 'Engulfing', 'direction': 'up' if is_up else 'down',
-            'entry': entry, 'stop': stop, 't1': t1, 't2': t2,
-            **_resolve(is_up, entry, stop, t1, t2),
+    calls = opening_range.get('patterns') if opening_range else premarket.get('watchlist', [])
+    for p in calls or []:
+        sym = p['symbol']
+        if sym not in section['symbols']:
+            continue
+        section['patterns'].append({
+            'symbol': sym, 'pattern': p['pattern'], 'direction': p['direction'],
+            'stage': 'opening_range' if opening_range else 'premarket',
+            'outcome': _resolve_pattern(p, _session_bar(series[sym].daily, S),
+                                        section['symbols'][sym]['eod_outcome']),
         })
-
-    od = _detect_outside_day(prior_slice)
-    if od in ['up', 'down']:
-        is_up = od == 'up'
-        mult  = 1 if is_up else -1
-        entry = round(setup_bar['high'] if is_up else setup_bar['low'], 2)
-        stop  = round(setup_bar['low']  if is_up else setup_bar['high'], 2)
-        od_range = setup_bar['high'] - setup_bar['low']
-        t1    = round(entry + 1.5 * od_range * mult, 2)
-        resolutions.append({
-            'pattern': 'Outside Day', 'direction': 'up' if is_up else 'down',
-            'entry': entry, 'stop': stop, 't1': t1,
-            **_resolve(is_up, entry, stop, t1),
-        })
-
-    return resolutions
+    return section
 
 
-def _prior_intraday(bars, session_date):
-    """Intraday bars from sessions before session_date."""
-    if session_date is None:
-        return bars
-    return [p for p in bars if bar_session_date(p[0]) < session_date]
+# ------------------------------------------------------------------
+# Orchestration
+# ------------------------------------------------------------------
 
-
-def _premarket_indicators(points, hourly, bars_5m, session_date):
-    """Indicator values as they stood before the session opened.
-
-    Confluence is a pre-open judgement, so every input here comes from completed
-    prior sessions plus the overnight/premarket window. Nothing reads the
-    session's own daily bar: its close and full-day volume do not exist when the
-    call is made, and a backtest reading them would rank setups using the answer.
-    """
-    prior = _prior_bars(points, session_date)
-    if not prior:
-        return None
-
-    last      = prior[-1][1]
-    rsi_vals  = _calculate_rsi(prior, 14)
-    macd      = _calculate_macd(prior)
-    ma20_vals = _calculate_moving_average(prior, 20)
-    vols      = [p[1]['volume'] for p in prior[-20:]]
-    vol_20d   = sum(vols) / len(vols) if vols else 0
-    macd_hist = (macd['line'][-1][1] - macd['signal'][-1][1]) \
-                if macd['line'] and macd['signal'] else 0.0
-
-    # The ATR fallback is measured on prior sessions too. Reading the live
-    # atr_current here would have leaked the session's own high/low into the
-    # score on any day with no premarket bars.
-    atr_vals    = _calculate_atr(prior, 14)
-    atr_prior   = atr_vals[-1][1] if atr_vals else 0.0
-    atr_prior_avg = sum(a[1] for a in atr_vals[-20:]) / min(20, len(atr_vals)) if atr_vals else 0.0
-
-    pm = _compute_premarket_metrics(bars_5m, session_date) if bars_5m else None
-    pm_range_active = (pm['range']['ratio'] >= 0.7) if (pm and pm.get('has_range')) \
-                      else (atr_prior > atr_prior_avg)
-
-    prior_hourly = _prior_intraday(hourly, session_date)
-    squeeze = _calculate_squeeze(prior_hourly) if prior_hourly else \
-              {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
-    rsi_div = _calculate_rsi_divergence(prior_hourly) if prior_hourly else \
-              {'signal': 'unknown', 'description': 'No hourly data'}
-
-    return {
-        'prior_close':      round(last['close'], 2),
-        'rsi_14':           round(rsi_vals[-1][1], 1) if rsi_vals else 50.0,
-        'macd_histogram':   round(macd_hist, 4),
-        'above_ma_20':      last['close'] > (ma20_vals[-1][1] if ma20_vals else last['close']),
-        'volume_above_20d': last['volume'] > vol_20d if vol_20d > 0 else False,
-        'pm_range_active':  pm_range_active,
-        'squeeze':          squeeze,
-        'rsi_divergence':   rsi_div,
-        'atr_14':           round(atr_prior, 2),
-    }
-
-
-CONFLUENCE_MAX = 8
-
-
-def _score_confluence(direction, pm, day_grade, regime_match):
-    """Step 4 confluence score, 0-8, from pre-open inputs only.
-
-    Scored here rather than in the browser so the number is a stamped fact about
-    the morning: the page renders it and the portfolio backtest ranks on it,
-    with no second implementation to drift. Because every input comes from
-    `_premarket_indicators`, the result is phase-invariant — the post-close run
-    recomputes the identical score rather than overwriting a morning value with
-    an afternoon one, so nothing has to be preserved across runs.
-    """
-    if pm is None:
-        return None
-    is_up   = direction == 'up'
-    squeeze = pm['squeeze']
-    checks = {
-        'Volume > 20d avg (daily)': bool(pm['volume_above_20d']),
-        'PM range active':          bool(pm['pm_range_active']),
-        'RSI extreme (daily)':      pm['rsi_14'] < 35 or pm['rsi_14'] > 65,
-        'MACD aligned (daily)':     pm['macd_histogram'] > 0 if is_up else pm['macd_histogram'] < 0,
-        'MA(20) aligned (daily)':   bool(pm['above_ma_20']) if is_up else not pm['above_ma_20'],
-        'Day A or A+':              day_grade in ('A', 'A+'),
-        'Regime matches':           bool(regime_match),
-        'Squeeze aligned (hourly)': squeeze['status'] not in ('none', 'unknown') and
-                                    (squeeze['momentum_increasing'] is True if is_up
-                                     else squeeze['momentum_increasing'] is False),
-    }
-    return {'score': sum(1 for v in checks.values() if v),
-            'max': CONFLUENCE_MAX,
-            'checks': checks}
-
-
-def _size_trade(day_grade, score, sizing_config):
-    """Position size as a percentage of the day's normal size.
-
-    Two inputs, per docs/trading-rules.md: the day grade sets a posture for the
-    whole session, and each setup's confluence scales within it. Regime is not
-    one of them — it gates which patterns are valid, never the size.
-
-    Lived in the browser until now, which meant the backtester had no way to
-    size a trade without a second copy of the tables.
-    """
-    day_factor = sizing_config['day_posture'].get(day_grade, 1.0)
-    conf_factor, tier_label = 0.0, None
-    for tier in sizing_config['confluence_tiers']:
-        if score >= tier['min']:
-            conf_factor, tier_label = tier['factor'], tier['label']
-            break
-    return {
-        'day_factor':        day_factor,
-        'confluence_factor': conf_factor,
-        'effective_pct':     round(day_factor * conf_factor * 100, 1),
-        'tier_label':        tier_label,
-    }
-
-
-def _plan_levels(direction, entry, atr, targets_config):
-    """Stop and targets as ATR multiples off an entry.
-
-    The same 1.5x / 2.0x multiples were written here *and* in trade.js. They now
-    come from config and are stamped, so the page and the backtester read one
-    set of numbers. `entry` is None for setups whose trigger only exists once
-    the session is running — the multiples still describe the plan, so the
-    distances are emitted even when the absolute levels cannot be.
-    """
-    mult = 1 if direction == 'up' else -1
-    plan = {
-        'stop_atr': targets_config['stop_atr'],
-        't1_atr':   targets_config['t1_atr'],
-        't2_atr':   targets_config['t2_atr'],
-        'stop_distance': round(targets_config['stop_atr'] * atr, 2),
-        't1_distance':   round(targets_config['t1_atr']   * atr, 2),
-        't2_distance':   round(targets_config['t2_atr']   * atr, 2),
-        'entry': None, 'stop': None, 't1': None, 't2': None,
-    }
-    if entry is not None:
-        plan.update({
-            'entry': round(entry, 2),
-            'stop':  round(entry - mult * targets_config['stop_atr'] * atr, 2),
-            't1':    round(entry + mult * targets_config['t1_atr']   * atr, 2),
-            't2':    round(entry + mult * targets_config['t2_atr']   * atr, 2),
-        })
-    return plan
-
-
-def _calculate_eod_outcomes(points, hourly_points, gap, atr_14):
-    result = {
-        'orb_high': None, 'orb_low': None, 'orb_breached_up': False, 'orb_breached_down': False,
-        'orb_breached': False, 'orb_direction': 'none', 'orb_hit_t1': False,
-        'gap_filled': False, 'day_range': 0.0, 'day_range_pct': 0.0, 'day_atr_multiple': 0.0,
-    }
-    if len(points) < 2: return result
-    today      = points[-1][1]
-    prev_close = points[-2][1]['close']
-    day_range  = today['high'] - today['low']
-    result['day_range'] = round(day_range, 2)
-    if today['low'] > 0 and atr_14 > 0:
-        result['day_range_pct']    = round(day_range / today['low'] * 100, 2)
-        result['day_atr_multiple'] = round(day_range / atr_14, 2)
-    if gap['gap_type'] == 'up':
-        result['gap_filled'] = today['low'] <= prev_close
-    elif gap['gap_type'] == 'down':
-        result['gap_filled'] = today['high'] >= prev_close
-    if hourly_points:
-        today_date = datetime.fromtimestamp(points[-1][0], tz=timezone.utc).date()
-        session = _get_session_bars(hourly_points, 930, 1030, target_date=today_date)
-        if session:
-            orb_high = max(b[1]['high'] for b in session)
-            orb_low  = min(b[1]['low']  for b in session)
-            result.update({'orb_high': round(orb_high, 2), 'orb_low': round(orb_low, 2)})
-            bu, bd = today['high'] > orb_high, today['low'] < orb_low
-            result.update({'orb_breached_up': bu, 'orb_breached_down': bd, 'orb_breached': bu or bd})
-            if bu and bd:
-                result['orb_direction'] = 'up' if today['close'] > (orb_high + orb_low) / 2 else 'down'
-            elif bu: result['orb_direction'] = 'up'
-            elif bd: result['orb_direction'] = 'down'
-            if atr_14 > 0:
-                result['orb_hit_t1'] = (bu and today['high'] >= orb_high + 1.5 * atr_14) or \
-                                       (bd and today['low'] <= orb_low - 1.5 * atr_14)
-    return result
+STAGE_BUILDERS = {
+    'premarket':     _stage_premarket,
+    'open':          _stage_open,
+    'opening_range': _stage_opening_range,
+    'recap':         _stage_recap,
+}
 
 
 def _generate_trading_signals(db, cache_dir, target_date=None):
-    trading_symbols, regime_symbols, _, regime_config, sizing_config, targets_config = _load_config()
-    _t1_atr = targets_config['t1_atr']
-    _t2_atr = targets_config['t2_atr']
-    symbols = trading_symbols
-    if not symbols:
+    cfg = _load_config()
+    if not cfg.symbols:
         raise ValueError("No trading symbols in trading_config.json")
 
-    print(f"Generating trading signals for {len(symbols)} symbols...")
+    print(f"Generating trading signals for {len(cfg.symbols)} symbols...")
     now_utc = datetime.now(timezone.utc)
 
-    daily_data:   dict = {s: db.load_daily_ohlcv(s)  for s in symbols}
-    hourly_data:  dict = {s: db.load_hourly_ohlcv(s) for s in symbols}
-    five_min_data: dict = {s: db.load_5m_ohlcv(s)   for s in symbols}
+    symbols = cfg.symbols + ['VIX']
+    history = PriceHistory.load(db, symbols, through=target_date)
+    session_date = history.session_date or now_utc.date()
 
-    if target_date:
-        target_ts   = int(datetime(target_date.year, target_date.month, target_date.day, tzinfo=timezone.utc).timestamp())
-        next_day_ts = target_ts + 86400
-        for s in symbols:
-            daily_data[s]    = [p for p in daily_data[s]    if p[0] <= target_ts]
-            hourly_data[s]   = [p for p in hourly_data[s]   if p[0] < next_day_ts]
-            five_min_data[s] = [p for p in five_min_data[s] if p[0] < next_day_ts]
-
-    spy_last = daily_data.get('SPY', [])
-    data_day = datetime.fromtimestamp(spy_last[-1][0], tz=timezone.utc).date() if spy_last else now_utc.date()
-    is_weekend = data_day.weekday() >= 5
+    # Stages run in session order. Each reads its own time series per symbol
+    # and the sections before it. A stage whose data isn't there yet gets the
+    # standard not-available section.
+    sections = {}
+    for stage in cfg.stages:
+        series = {s: history.get_time_series(s, stage) for s in symbols}
+        if not series[REFERENCE_SYMBOL].available:
+            sections[stage.name] = _not_available(stage)
+            continue
+        available = {s: ts for s, ts in series.items() if ts.available}
+        sections[stage.name] = STAGE_BUILDERS[stage.name](cfg, stage, session_date, available, sections)
 
     output = {
-        'generated': now_utc.isoformat(),
-        'market_closed': is_weekend,
-        'day_quality': {},
-        'day_realized': {},
-        'regime': {},
-        'symbols': {},
-        'active_patterns': [],
+        'session_date':  session_date.isoformat(),
+        'generated':     now_utc.isoformat(),
+        'market_closed': session_date.weekday() >= 5,
+        **sections,
     }
 
-    def bar_time(bars, idx):
-        if not bars: return None
-        return bar_clock(bars[idx][0])
+    path = cache_dir / f"trading_signals_{session_date.isoformat()}.json"
+    with open(path, 'w') as f:
+        json.dump(output, f, indent=2)
+    print(f"✓ {session_date} stages: "
+          f"{', '.join(k for k, v in sections.items() if v.get('status') != 'not_available')} → {path}")
 
-    spy_hourly = hourly_data.get('SPY', [])
-    spy_5m     = five_min_data.get('SPY', [])
-    spy_daily  = daily_data.get('SPY', [])
-    daily_latest  = datetime.fromtimestamp(spy_daily[-1][0], tz=timezone.utc).date() if spy_daily else None
-    intra_latest  = bar_session_date(spy_5m[-1][0]) if spy_5m else (
-                    bar_session_date(spy_hourly[-1][0]) if spy_hourly else None)
-    spy_date = intra_latest if (intra_latest and daily_latest and intra_latest > daily_latest) else daily_latest
-
-    pm_bars   = _get_session_bars(spy_5m, 800,  930,  target_date=spy_date)
-    orb_bars  = _get_session_bars(spy_5m, 930,  1030, target_date=spy_date)
-    sess_bars = _get_session_bars(spy_5m, 930,  1600, target_date=spy_date)
-    lh_bars   = _get_session_bars(spy_5m, 1500, 1600, target_date=spy_date)
-
-    output['windows'] = {
-        'premarket':     {'from': bar_time(pm_bars,   0),  'to': bar_time(pm_bars,   -1)},
-        'opening_range': {'from': bar_time(orb_bars,  0),  'to': bar_time(orb_bars,  -1)},
-        'session':       {'from': bar_time(sess_bars, 0),  'to': bar_time(sess_bars, -1)},
-        'last_hour':     {'from': bar_time(lh_bars,   0),  'to': bar_time(lh_bars,   -1)},
-    }
-
-    # Frontend uses this to fetch data/cache/intraday/{SYM}_{session_date}.json.
-    output['session_date'] = spy_date.isoformat() if spy_date else None
-
-    # Stated explicitly rather than inferred downstream: consumers used to guess
-    # completeness from whether eod_outcome was populated, which reads a partial
-    # intraday bar as a finished session.
-    phase = _determine_phase(spy_daily, spy_5m, spy_date)
-    session_complete = (phase == 'eod')
-    output['phase'] = phase
-    output['session_complete'] = session_complete
-
-    expansion = _compute_expansion_evidence(spy_daily, spy_5m, spy_date, session_complete)
-    # Regime is Step 2 of a pre-open framework, so it reads prior sessions only.
-    # `_completed_bars` inside _detect_regime treats today's bar as fair game
-    # once the session closes, which made the post-close label differ from the
-    # morning's and — because `regime_match` feeds a confluence point — let the
-    # score depend on the day it was scoring.
-    _prior_daily  = {s: _prior_bars(p, spy_date)     for s, p in daily_data.items()}
-    _prior_hourly = {s: _prior_intraday(p, spy_date) for s, p in hourly_data.items()}
-    output['regime'] = _detect_regime(regime_symbols, _prior_daily, _prior_hourly,
-                                      session_date=spy_date,
-                                      session_complete=session_complete,
-                                      expansion=expansion,
-                                      regime_config=regime_config)
-    output['vix']    = _load_vix(db.load_daily_ohlcv('VIX'), spy_date, session_complete)
-
-    _align_score, _align_detail = _compute_alignment_score(regime_symbols, hourly_data, spy_date)
-
-    premarket_by_symbol: dict = {}
-
-    for symbol in symbols:
-        points = daily_data.get(symbol, [])
-        if len(points) < 2:
-            continue
-
-        today_ts, today_ohlcv = points[-1]
-        atr_vals = _calculate_atr(points, 14)
-        atr_current   = atr_vals[-1][1] if atr_vals else 0.0
-        atr_20day_avg = sum(a[1] for a in atr_vals[-20:]) / min(20, len(atr_vals)) if atr_vals else 0.0
-        rsi_vals = _calculate_rsi(points, 14)
-        rsi_current = rsi_vals[-1][1] if rsi_vals else 50.0
-        macd = _calculate_macd(points)
-        macd_line_val   = macd['line'][-1][1]   if macd['line']   else 0.0
-        macd_signal_val = macd['signal'][-1][1] if macd['signal'] else 0.0
-        ma20_vals = _calculate_moving_average(points, 20)
-        ma20_current = ma20_vals[-1][1] if ma20_vals else today_ohlcv['close']
-
-        vols = [p[1]['volume'] for p in points[-50:]]
-        vol_20d_avg = sum(vols[-20:]) / 20 if len(vols) >= 20 else 0
-        vol_50d_avg = sum(vols[-50:]) / 50 if len(vols) >= 50 else 0
-
-        hourly = hourly_data.get(symbol, [])
-        bars_5m = five_min_data.get(symbol, [])
-        today_date = datetime.fromtimestamp(today_ts, tz=timezone.utc).date()
-        pm_bars_sym  = _get_session_bars(bars_5m, 800,  930,  target_date=today_date) if bars_5m else []
-        lh_bars_sym  = _get_session_bars(bars_5m, 1500, 1600, target_date=today_date) if bars_5m else []
-
-        pm_sym = _compute_premarket_metrics(bars_5m, today_date) if bars_5m else None
-        pm_range_active = (pm_sym['range']['ratio'] >= 0.7) if (pm_sym and pm_sym.get('has_range')) else (atr_current > atr_20day_avg)
-
-        hist_gaps = [abs(points[i][1]['open'] - points[i-1][1]['close'])
-                     for i in range(max(1, len(points) - 20), len(points))]
-        sym_median_gap = statistics.median(hist_gaps) if hist_gaps else 0.0
-
-        gap = _detect_gap(points)
-        if sym_median_gap > 0:
-            gap_pts_dollar = abs(points[-1][1]['open'] - points[-2][1]['close'])
-            gap = {**gap,
-                   'gap_significant': gap_pts_dollar >= 0.5 * sym_median_gap,
-                   'gap_strong':      gap_pts_dollar >= 1.5 * sym_median_gap,
-                   'median_overnight_gap': round(sym_median_gap, 2)}
-        else:
-            gap = {**gap, 'median_overnight_gap': None}
-
-        outside_day_dir = _detect_outside_day(points)
-        outside_day     = outside_day_dir in ['up', 'down']
-        _orb_bars     = _get_session_bars(bars_5m, 930, 1030, target_date=today_date) if bars_5m else []
-        opening_range = (max(b[1]['high'] for b in _orb_bars) - min(b[1]['low'] for b in _orb_bars)) if _orb_bars else 0.0
-        orb_qualified = opening_range > 0.75 * atr_20day_avg if atr_20day_avg else False
-        # Suppressed until the session is actually over. Computing this on a
-        # partial bar produces a plausible-looking but wrong "final" result.
-        eod_outcome   = _calculate_eod_outcomes(points, bars_5m, gap, atr_current) \
-                        if session_complete else {}
-        engulfing       = _detect_engulfing(points, vol_20d_avg)
-        squeeze         = _calculate_squeeze(hourly) if hourly else {'status': 'unknown', 'momentum': 0.0, 'momentum_increasing': False}
-        vwap            = _calculate_vwap(bars_5m) if bars_5m else {'vwap': None, 'above_vwap': None, 'distance_pct': None}
-        rsi_div         = _calculate_rsi_divergence(hourly) if hourly else {'signal': 'unknown', 'description': 'No hourly data'}
-        premarket_by_symbol[symbol] = _premarket_indicators(points, hourly, bars_5m, spy_date)
-
-        # ADR: average daily range on prior complete bars only (date-anchored —
-        # points[:-1] drops a real prior session whenever today's bar is absent).
-        _prior = _prior_bars(points, spy_date)
-        _ranges = [p[1]['high'] - p[1]['low'] for p in _prior if p[1]['high'] and p[1]['low']]
-        adr_20d    = round(sum(_ranges[-20:]) / min(20, len(_ranges)), 2) if _ranges else None
-        adr_8d     = round(sum(_ranges[-8:])  / min(8,  len(_ranges)), 2) if _ranges else None
-        prev_range = round(_ranges[-1], 2) if _ranges else None
-
-        if symbol == 'SPY':
-            if is_weekend:
-                output['day_quality'] = {'grade': 'N/A', 'scores': {}}
-            else:
-                regime_label = output['regime'].get('label', 'Ranging')
-                # Pre-open forecast: prior sessions only, in every phase.
-                day_grade, scores = _grade_day_quality(
-                    _prior_bars(points, spy_date), bars_5m, spy_date, regime_label,
-                    adr_8d=adr_8d, adr_20d=adr_20d,
-                    alignment_score=_align_score, alignment_detail=_align_detail,
-                )
-                # The factor is the rule; the page turns it into "Full" / "Half"
-                # / "No trades". Numbers here, words there.
-                output['day_quality'] = {
-                    'grade': day_grade, 'scores': scores,
-                    'posture_factor': sizing_config['day_posture'].get(day_grade, 1.0),
-                }
-                output['day_realized'] = _grade_realized(
-                    points, spy_date, eod_outcome, day_grade, scores.get('total'),
-                ) if session_complete else {}
-            output['vol_regime'] = _classify_vol_regime(points, atr_current)
-
-        output['symbols'][symbol] = {
-            'date':    datetime.fromtimestamp(today_ts, tz=timezone.utc).strftime('%Y-%m-%d'),
-            'open':    round(today_ohlcv['open'],  2),
-            'high':    round(today_ohlcv['high'],  2),
-            'low':     round(today_ohlcv['low'],   2),
-            'close':   round(today_ohlcv['close'], 2),
-            'volume':  today_ohlcv['volume'],
-            'volume_above_20d': today_ohlcv['volume'] > vol_20d_avg if vol_20d_avg > 0 else False,
-            'atr_14':  round(atr_current, 2),
-            'atr_20d_avg': round(atr_20day_avg, 2),
-            'atr_above_avg': pm_range_active,
-            # Pre-open copies of the same indicators. The fields above carry the
-            # session's own bar once it closes, which is right for an EOD view
-            # and wrong for the morning one — Step 5 was rendering closing values
-            # beside Step 4 checks scored on these, so a card could show
-            # "MACD aligned" next to a bearish MACD.
-            'preopen': premarket_by_symbol[symbol],
-            'rsi_14':  round(rsi_current, 1),
-            'macd_line':      round(macd_line_val, 4),
-            'macd_signal':    round(macd_signal_val, 4),
-            'macd_histogram': round(macd_line_val - macd_signal_val, 4),
-            'ma_20': round(ma20_current, 2),
-            'above_ma_20': today_ohlcv['close'] > ma20_current,
-            'gap_pct': gap['gap_pct'], 'gap_type': gap['gap_type'],
-            'gap_significant': gap['gap_significant'], 'gap_strong': gap['gap_strong'],
-            'median_overnight_gap': gap.get('median_overnight_gap'),
-            'outside_day': outside_day, 'outside_day_direction': outside_day_dir,
-            'patterns': {
-                'orb_qualified': orb_qualified,
-                'gap_fill_candidate':         gap['gap_significant'] and gap['gap_type'] != 'none',
-                'gap_continuation_candidate': gap['gap_strong']      and gap['gap_type'] != 'none',
-                'outside_day': outside_day,
-            },
-            'engulfing': engulfing, 'squeeze': squeeze, 'vwap': vwap, 'rsi_divergence': rsi_div,
-            'eod_outcome': eod_outcome,
-            # Resolve against completed bars only — otherwise a setup gets marked
-            # hit/stopped against a session that is still running.
-            'prior_setups': _resolve_prior_setups(_completed_bars(points)),
-            'adr_20d': adr_20d, 'adr_8d': adr_8d, 'prev_range': prev_range,
-            'day_type': _classify_day_type(_completed_bars(points)),
-            'premarket': {
-                'high':  round(max(b[1]['high'] for b in pm_bars_sym), 2) if pm_bars_sym else None,
-                'low':   round(min(b[1]['low']  for b in pm_bars_sym), 2) if pm_bars_sym else None,
-                'close': round(pm_bars_sym[-1][1]['close'], 2)             if pm_bars_sym else None,
-            },
-            'last_hour': {
-                'high':  round(max(b[1]['high'] for b in lh_bars_sym), 2) if lh_bars_sym else None,
-                'low':   round(min(b[1]['low']  for b in lh_bars_sym), 2) if lh_bars_sym else None,
-                'close': round(lh_bars_sym[-1][1]['close'], 2)             if lh_bars_sym else None,
-            },
-        }
-
-        # Active patterns (same logic as original)
-        orb_has_levels = orb_qualified and (opening_range or 0) > 0
-        orb_watch = (not orb_has_levels) and output['regime'].get('label') == 'Trending' and pm_range_active
-
-        favored_patterns = output['regime'].get('favored', {}).get('patterns', [])
-        gap_pattern_name = gap_direction = gap_notes = gap_levels = None
-        gap_key = None
-        gap_continuation_hits = {}
-        if gap['gap_significant'] and gap['gap_type'] != 'none':
-            market_regime = output['regime'].get('label', 'Ranging')
-            is_up_gap = gap['gap_type'] == 'up'
-            prev_close_val = round(points[-2][1]['close'], 2)
-            today_open_val = round(today_ohlcv['open'], 2)
-            gap_pts_abs = abs(today_open_val - prev_close_val)
-            mult = 1 if is_up_gap else -1
-            ratio_str = f"{gap_pts_abs / sym_median_gap:.1f}× median" if sym_median_gap else ""
-            if gap['gap_strong'] and market_regime == 'Trending':
-                gap_pattern_name, gap_direction = 'Gap Continuation', gap['gap_type']
-                gap_key = 'gap_continuation'
-                gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · Trending"
-                t1_cont = round(today_open_val + _t1_atr * atr_current * mult, 2)
-                t2_cont = round(today_open_val + _t2_atr * atr_current * mult, 2)
-                gap_levels = {'prev_close': prev_close_val, 'today_open': today_open_val,
-                              't1_continuation': t1_cont, 't2_continuation': t2_cont,
-                              'atr': round(atr_current, 2)}
-                # Resolve continuation targets against today's session extremes.
-                # Up gap: continuation up → check today's high. Down gap: check today's low.
-                probe = today_ohlcv['high'] if is_up_gap else today_ohlcv['low']
-                gap_continuation_hits = {
-                    'hit_t1_continuation': (probe >= t1_cont) if is_up_gap else (probe <= t1_cont),
-                    'hit_t2_continuation': (probe >= t2_cont) if is_up_gap else (probe <= t2_cont),
-                }
-            else:
-                gap_pattern_name, gap_direction = 'Gap Fill', ('down' if is_up_gap else 'up')
-                gap_key = 'gap_fill'
-                gap_notes  = f"Gap {gap['gap_pct']:+.2f}% · {gap_pts_abs:.2f} pts · {ratio_str} · {market_regime}"
-                gap_levels = {'prev_close': prev_close_val, 'today_open': today_open_val, 'fill_target': prev_close_val,
-                              'atr': round(atr_current, 2)}
-
-        if orb_has_levels:
-            orb_h = eod_outcome.get('orb_high') or 0.0
-            orb_l = eod_outcome.get('orb_low')  or 0.0
-            orb_levels = {
-                'orb_high': eod_outcome.get('orb_high'), 'orb_low': eod_outcome.get('orb_low'),
-                't1_up':   round(orb_h + _t1_atr * atr_current, 2) if orb_h else None,
-                't1_down': round(orb_l - _t1_atr * atr_current, 2) if orb_l else None,
-                't2_up':   round(orb_h + _t2_atr * atr_current, 2) if orb_h else None,
-                't2_down': round(orb_l - _t2_atr * atr_current, 2) if orb_l else None,
-                'atr': round(atr_current, 2),
-            }
-            if gap_levels:
-                orb_levels.update({k: v for k, v in gap_levels.items() if k not in orb_levels})
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': f"ORB + {gap_pattern_name}" if gap_pattern_name else 'ORB',
-                'direction': gap_direction if gap_pattern_name else 'watch',
-                'notes': f"Range {opening_range:.2f} · {gap_notes}" if gap_notes else f"ATR {atr_current:.2f} > avg {atr_20day_avg:.2f}",
-                'levels': orb_levels,
-                'outcome': {'next_day': False, 'breached': eod_outcome.get('orb_breached', False),
-                            'direction': eod_outcome.get('orb_direction', 'none'),
-                            'hit_t1': eod_outcome.get('orb_hit_t1', False),
-                            'filled': eod_outcome.get('gap_filled', False),
-                            **gap_continuation_hits},
-                **_pattern_keys(['orb'] + ([gap_key] if gap_key else []), favored_patterns),
-            })
-        elif orb_watch and gap_pattern_name:
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': f"ORB + {gap_pattern_name}", 'direction': gap_direction,
-                'notes': f"Entry: ORB breakout · {gap_notes}",
-                'levels': {**gap_levels, 'entry': 'ORB breakout at open'},
-                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False),
-                            **gap_continuation_hits},
-                **_pattern_keys(['orb', gap_key], favored_patterns),
-            })
-        elif orb_watch:
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': 'ORB', 'direction': 'watch',
-                'notes': "Trending regime · PM range active · no gap", 'levels': {},
-                'outcome': {'no_trade': True, 'reason': 'Range < 0.75× ATR'},
-                **_pattern_keys(['orb'], favored_patterns),
-            })
-        elif gap_pattern_name:
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': gap_pattern_name, 'direction': gap_direction,
-                'notes': gap_notes, 'levels': gap_levels,
-                'outcome': {'next_day': False, 'filled': eod_outcome.get('gap_filled', False),
-                            **gap_continuation_hits},
-                **_pattern_keys([gap_key], favored_patterns),
-            })
-
-        if engulfing in ['bullish', 'bearish']:
-            is_up = engulfing == 'bullish'
-            mult  = 1 if is_up else -1
-            entry = round(today_ohlcv['high'] if is_up else today_ohlcv['low'], 2)
-            stop  = round(today_ohlcv['low']  if is_up else today_ohlcv['high'], 2)
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': 'Engulfing', 'direction': 'up' if is_up else 'down',
-                'notes': f"{'Bullish' if is_up else 'Bearish'} engulfing, vol confirmed",
-                'levels': {'entry': entry, 'stop': stop,
-                           't1': round(entry + _t1_atr * atr_current * mult, 2),
-                           't2': round(entry + _t2_atr * atr_current * mult, 2), 'atr': round(atr_current, 2)},
-                'outcome': {'next_day': True, 'note': f"Enter {'above' if is_up else 'below'} ${entry:.2f} next session"},
-                **_pattern_keys(['engulfing'], favored_patterns),
-            })
-
-        if outside_day:
-            is_up = outside_day_dir == 'up'
-            mult  = 1 if is_up else -1
-            entry = round(today_ohlcv['high'] if is_up else today_ohlcv['low'], 2)
-            stop  = round(today_ohlcv['low']  if is_up else today_ohlcv['high'], 2)
-            od_range = today_ohlcv['high'] - today_ohlcv['low']
-            output['active_patterns'].append({
-                'symbol': symbol, 'pattern': 'Outside Day', 'direction': outside_day_dir,
-                'notes': f"Close {'upper' if is_up else 'lower'} 25%: {today_ohlcv['close']:.2f}",
-                'levels': {'entry': entry, 'stop': stop,
-                           't1': round(entry + 1.5 * od_range * mult, 2),
-                           'range_size': round(od_range, 2), 'atr': round(atr_current, 2)},
-                'outcome': {'next_day': True, 'note': f"Enter {'above' if is_up else 'below'} ${entry:.2f} next session"},
-                **_pattern_keys(['outside_day'], favored_patterns),
-            })
-
-    # Stamped after every pattern exists, so Step 4 no longer has to re-derive it
-    # in the browser. Pre-open inputs only — see _score_confluence.
-    _pre_grade = output.get('day_quality', {}).get('grade')
-    _min_conf  = sizing_config['min_confluence']
-    for _p in output['active_patterns']:
-        _conf = _score_confluence(_p['direction'], premarket_by_symbol.get(_p['symbol']),
-                                  _pre_grade, _p.get('regime_match'))
-        if not _conf:
-            continue
-        _p['confluence'] = _conf
-        # `qualifies` is the verdict on whether a setup is worth taking at all.
-        # The page used to apply its own `score >= 3`; stamping it means the
-        # page and the backtester cannot disagree about which setups were live.
-        _p['qualifies'] = _conf['score'] >= _min_conf
-        _p['sizing']    = _size_trade(_pre_grade, _conf['score'], sizing_config)
-        _lv    = _p.get('levels') or {}
-        _entry = _lv.get('entry') if isinstance(_lv.get('entry'), (int, float)) else None
-        # Pre-open ATR, not `levels.atr` — the plan is the morning's, and
-        # `levels.atr` carries the session's own range once it closes. Sizing a
-        # stop off the day's realised volatility is not a distance anyone could
-        # have used at the open.
-        _pm    = premarket_by_symbol.get(_p['symbol']) or {}
-        _atr   = _pm.get('atr_14') or _lv.get('atr')
-        if _atr:
-            _p['plan'] = _plan_levels(_p['direction'], _entry, _atr, targets_config)
-
-    data_date = spy_date or now_utc.date()
-
-    # Dated history is written only for finished sessions. It's the record used
-    # to score the model over time, so a mid-session snapshot must never land in
-    # it — if the post-close run fails, the day is simply absent rather than
-    # silently wrong.
-    if session_complete:
-        dated_path = cache_dir / f"trading_signals_{data_date.isoformat()}.json"
-        with open(dated_path, 'w') as f:
-            json.dump(output, f, indent=2)
-        print(f"✓ {len(output['symbols'])} symbols, {len(output['active_patterns'])} patterns → {dated_path}")
-    else:
-        print(f"✓ {len(output['symbols'])} symbols, {len(output['active_patterns'])} patterns "
-              f"(phase={phase}; dated history withheld until session closes)")
-
-    # The canonical file is always written so the live page reflects the latest
-    # run, with `phase` telling the frontend what it's looking at.
-    if target_date is None:
-        canon = cache_dir / 'trading_signals.json'
-        with open(canon, 'w') as f:
-            json.dump(output, f, indent=2)
-        print(f"✓ Canonical → {canon}")
-
-    _emit_intraday_bars(cache_dir, symbols, five_min_data, spy_date)
+    _emit_intraday_bars(cache_dir, cfg.symbols, history, session_date)
 
 
-def _emit_intraday_bars(cache_dir, symbols, five_min_data, session_date):
+def _emit_intraday_bars(cache_dir, symbols, history, session_date):
     """Emit per-symbol 5m OHLCV for overnight (prior 16:00 ET → session 09:30 ET)
     and RTH day session (09:30 ET → 16:00 ET) as data/cache/intraday/{SYM}_{DATE}.json."""
     if session_date is None:
@@ -1424,25 +1349,22 @@ def _emit_intraday_bars(cache_dir, symbols, five_min_data, session_date):
     intraday_dir.mkdir(parents=True, exist_ok=True)
 
     def _serialize(bar_list):
-        out = []
-        for ts, ohlcv in bar_list:
-            out.append({
-                'time':   ts,
-                'open':   round(ohlcv['open'],  4),
-                'high':   round(ohlcv['high'],  4),
-                'low':    round(ohlcv['low'],   4),
-                'close':  round(ohlcv['close'], 4),
-                'volume': int(ohlcv.get('volume') or 0),
-            })
-        return out
+        return [{
+            'time':   ts,
+            'open':   round(ohlcv['open'],  4),
+            'high':   round(ohlcv['high'],  4),
+            'low':    round(ohlcv['low'],   4),
+            'close':  round(ohlcv['close'], 4),
+            'volume': int(ohlcv.get('volume') or 0),
+        } for ts, ohlcv in bar_list]
 
     written = 0
     for symbol in symbols:
-        bars = five_min_data.get(symbol) or []
+        bars = history.get_time_series(symbol).five_min
         if not bars:
             continue
         overnight = _get_overnight_bars(bars, session_date)
-        day       = _get_session_bars(bars, 930, 1600, target_date=session_date)
+        day       = _window(bars, session_date, RTH_OPEN, RTH_CLOSE)
         if not overnight and not day:
             continue
         payload = {
@@ -1463,6 +1385,5 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--date', default=None)
     args = parser.parse_args()
-    from datetime import date as date_cls
     td = datetime.strptime(args.date, '%Y-%m-%d').date() if args.date else None
     TradingGenerator().generate(target_date=td)
