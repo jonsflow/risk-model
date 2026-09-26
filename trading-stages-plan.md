@@ -98,3 +98,109 @@ morning call.
 - Whether a mid-morning stage should carry signals beyond the opening range.
 - Symbol dropdown: Steps 1–2 are SPY-only by design but sit above the per-symbol
   steps, so switching symbols looks like it does nothing.
+
+## Decisions since the review (2026-09-23 → 09-25)
+
+- **Terminology:** a stage has a *window end*, not a cutoff. Config key
+  `premarket_window_end`; each section carries `window_end`.
+- **Append-only day file.** A stage is calculated once and appended to
+  `trading_signals_<date>.json`. Later stages never recalculate earlier ones;
+  they may read the results already written. Only a backfill goes backwards.
+- **Each stage scores its own calls.** Premarket scores its watchlist;
+  opening range scores only its ORB setups; recap grades the earlier calls
+  from their stored results.
+- **Missing data is handled gracefully.** A stage whose data isn't there gets
+  `{status: "not_available", window_end, message}`; the pages show the
+  message and no data for that stage.
+- **Scope is the last 60 days** (Yahoo's 5-min window). Nothing older is our
+  responsibility.
+- **Workflows are assumed to run on time**, just after each window end.
+
+## Code design
+
+### Built and committed (`feat/trading-stages`, 7f2f782b)
+
+- `Stage(name, label, window_end, timeframes)` — built by
+  `Stage.all_from_config`. Premarket reads daily/1h/5m; open, opening range and
+  recap read daily/5m.
+- `PriceHistory.load(db, symbols, through)` — every bar loaded once, keyed
+  symbol → timeframe → bars; holds `session_date`.
+- `PriceHistory.get_time_series(symbol, stage=None)` — no stage: all bars, all
+  timeframes. With a stage: if every collected timeframe is there through the
+  window end, each timeframe cut to bars that ended by it; otherwise
+  `available=False`. A daily bar ends at its session's close once complete.
+  Timeframes never collected for a symbol (VIX has no 5-min) are skipped.
+- A stage is not available when SPY's data isn't there; other symbols without
+  data are left out of the section.
+- Pages: `trade.html` loads by date, renders each stage, shows the
+  not-available message; `trade_recap.html` shows the recap.
+  `js/core/trade-common.js` is shared.
+- `tests/test_trading_stages.py`, `docs/trading-generator-architecture.html`.
+
+**Still recalculated every stage on each run** — replaced by the append-only
+change below.
+
+### Built, uncommitted: append-only, one stage per run
+
+- `SessionFile` — the day's file as an append-only record: `open(cache_dir,
+  session_date, stages)` (existing JSON, or every stage not available),
+  `has(name)`, `sections()` (a deep copy — nothing a builder does reaches the
+  file), `append(name, section)` (raises if written), `save(generated)`.
+- `_generate_trading_signals(db, cache_dir, target_date=None, stage_name=None)`
+  computes **one** stage: `cfg.stage(stage_name)` if given
+  (`pipeline.run trading --stage open`), else
+  `history.current_stage(cfg.stages)` — the latest stage whose SPY data is
+  there. No loop. It does nothing when:
+  - no stage's data is there, or the chosen stage's data isn't there yet;
+  - the stage is already written;
+  - the stage is opening range or recap and premarket isn't written
+    (`NEEDS_PREMARKET` — both read the premarket section).
+- Intraday bar files (`data/cache/intraday/`) are still emitted on every run.
+- `_score_setups(cfg, patterns, preopen_by_symbol, grade)` — confluence,
+  sizing and plan, in place. Premarket scores its watchlist; opening range
+  scores only its ORB setups and no longer copies the watchlist.
+- `_stage_recap` grades `premarket.watchlist` and `opening_range.patterns`,
+  each graded call tagged with the `stage` that made it.
+- Pages: Steps 4–5 read the scored `premarket.watchlist` (shown once
+  premarket lands). The Opening range card lists ORB setups with score,
+  qualification and size tier. The recap page looks each call up in the stage
+  that made it (`watchlist` for premarket, `patterns` for opening range).
+- `scripts/backfill_trading_history.py` calls the generator once per stage, in
+  order, per date. Without `--force` it fills in missing stages; `--force`
+  deletes the day's file first.
+- `tests/test_trading_stages.py` replays the latest session into one file at
+  09:00, 09:40, 13:00 and 17:00 and checks: which sections exist, earlier
+  sections unchanged byte-for-byte, each section equal to a fresh backfill.
+  Also: the previous session backfills every stage; a stage is written once.
+  3 tests pass (local DB through 2026-08-21).
+- Verified in the browser against 08-19 (premarket only), 08-20 and 08-21:
+  Steps 4–5, the ORB list, the recap's per-stage lookup, not-available
+  messages. `data/cache` backed up and restored.
+- Design doc: `docs/trading-session-file.html`.
+
+## Open items
+
+- Crypto gaps: BTC/ETH trade 24/7, so gap-to-last-print is ~2,000× median and
+  flags a gap setup most days. Skip gap setups for crypto, or measure against
+  their own prior 09:00 price?
+- Update `CLAUDE.md` Cache Phase Contract (`phase` / `session_complete` are
+  gone) and `docs/trading-cache-architecture.md`.
+- Regenerate the last 60 days with the backfill script (`--days 60 --force`;
+  the default is still 90).
+- **Workflow slots.** `update-data-v2.yml` runs at 09:00 and 16:15 ET only, so
+  live days get premarket and recap but never open or opening range. Add
+  09:35 and 10:00 ET slots, each passing `--stage`.
+- A missed run leaves that stage missing for the day — there is no catch-up
+  loop. Backfill fills it.
+- Crypto in the recap: BTC/ETH have no closed daily bar at 16:00, so their
+  calls (including ORB) aren't graded. Same as before; part of the crypto item.
+- `docs/trading-generator-architecture.html` still describes the old
+  rewrite-every-run flow and opening-range scoring; update or fold into
+  `docs/trading-session-file.html`.
+
+## Working rules for this effort
+
+- Before writing code for a change or a correction, restate the understanding
+  and get confirmation. Only skip that when told to just go ahead.
+- Test the way a real day runs: earlier sessions complete, the latest one in
+  progress. `data/cache` is workflow-owned — back it up and restore it.

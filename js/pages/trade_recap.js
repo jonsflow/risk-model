@@ -116,15 +116,17 @@ function levelsHTML(lv) {
   return '';
 }
 
-// Each graded call joined back to the call itself, so its levels and score
-// show beside the outcome.
+// The list of calls each stage made, keyed by the stage name a graded call carries.
+const CALL_LISTS = { premarket: 'watchlist', opening_range: 'patterns' };
+
+// Each graded call joined back to the call itself, in the stage that made it,
+// so its levels and score show beside the outcome.
 function callsHTML() {
-  const source = hasStage(session, 'opening_range')
-    ? session.opening_range.patterns || [] : session.premarket.watchlist || [];
+  const madeBy = stage => hasStage(session, stage) ? session[stage][CALL_LISTS[stage]] || [] : [];
   const calls = (session.recap.patterns || []).filter(p => p.symbol === selectedSymbol);
   if (!calls.length) return `<div class="muted">No setups were called for ${selectedSymbol}.</div>`;
   return `<div style="display:flex; flex-wrap:wrap; gap:12px;">${calls.map(c => {
-    const src = source.find(p => p.symbol === c.symbol && p.pattern === c.pattern) || {};
+    const src = madeBy(c.stage).find(p => p.symbol === c.symbol && p.pattern === c.pattern) || {};
     const [label, color] = outcomeLabel(c.pattern, c.outcome || {});
     const conf = src.confluence;
     const dirArrow = c.direction === 'up' ? '▲' : c.direction === 'down' ? '▼' : '—';

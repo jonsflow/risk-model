@@ -1,0 +1,255 @@
+<title>Trading Session File</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --bg: #f5f6f9; --surface: #ffffff; --ink: #1b2230; --muted: #5a6474; --line: #d5dae3;
+    --pm: #3a5bd9; --op: #b8770f; --or: #0d8579; --rc: #b33d76;
+    --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+    --mono: 'IBM Plex Mono', ui-monospace, Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #12151b; --surface: #1a1f28; --ink: #e5e8ee; --muted: #98a1b0; --line: #2d3440;
+      --pm: #8199ff; --op: #e6a940; --or: #3fc2b2; --rc: #e57aab;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #12151b; --surface: #1a1f28; --ink: #e5e8ee; --muted: #98a1b0; --line: #2d3440;
+    --pm: #8199ff; --op: #e6a940; --or: #3fc2b2; --rc: #e57aab;
+  }
+  body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--sans); padding-inline: 20px; padding-block: 36px 56px; }
+  main { max-width: 920px; margin: 0 auto; display: grid; gap: 34px; }
+  h1 { font-size: 1.9rem; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; text-wrap: balance; }
+  h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 10px; text-wrap: balance; }
+  p { margin: 0; max-width: 68ch; }
+  .lede { color: var(--muted); }
+  code { font: 0.86em var(--mono); background: var(--surface); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  figure { margin: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 16px; overflow-x: auto; }
+  figure svg { display: block; width: 100%; min-width: 640px; height: auto; color: var(--ink); font-family: var(--sans); }
+  figcaption { color: var(--muted); font-size: 0.86rem; margin-top: 10px; max-width: 72ch; }
+  .box { fill: var(--surface); stroke: var(--line); stroke-width: 1.2; }
+  .frame { fill: none; stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 3; }
+  .wire { stroke: currentColor; stroke-width: 1.3; fill: none; opacity: 0.55; }
+  .cut { stroke: currentColor; stroke-width: 1; stroke-dasharray: 3 3; opacity: 0.45; }
+  .axis { stroke: var(--line); stroke-width: 1.2; }
+  .t { fill: currentColor; font-size: 12.5px; }
+  .tb { fill: currentColor; font-size: 13px; font-weight: 600; }
+  .tm { fill: var(--muted); font-size: 11px; }
+  .code { fill: currentColor; font: 11.5px var(--mono); }
+  .pm { fill: var(--pm); } .op { fill: var(--op); } .or { fill: var(--or); } .rc { fill: var(--rc); }
+  .pms { stroke: var(--pm); } .ops { stroke: var(--op); } .ors { stroke: var(--or); } .rcs { stroke: var(--rc); }
+  .arrowhead { fill: currentColor; opacity: 0.55; }
+  .tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; min-width: 720px; font-size: 0.9rem; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 500; }
+  tr:last-child td { border-bottom: 0; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; vertical-align: 0; }
+  ul.rules { margin: 0; padding-left: 20px; display: grid; gap: 6px; max-width: 72ch; }
+  .muted { color: var(--muted); }
+  .inv { fill: var(--surface); font-size: 12px; font-weight: 600; }
+  .na  { fill: var(--muted); font-size: 11px; font-style: italic; }
+  .eyebrow { font: 500 0.72rem var(--sans); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 0 0 8px; }
+  .note { border-left: 3px solid var(--op); padding: 2px 0 2px 14px; display: grid; gap: 6px; max-width: 72ch; }
+  section > p + p, section > p + ul { margin-top: 10px; }
+</style>
+
+<main>
+  <header>
+    <p class="eyebrow">docs · trading generator · feat/trading-stages</p>
+    <h1>Trading Session File</h1>
+    <p class="lede">Each generator run computes <strong>one</strong> stage and appends it to the day's <code>data/cache/trading_signals_&lt;date&gt;.json</code>. A stage is written once. Later stages read what earlier ones wrote but never recalculate it, so the morning call stays what we were advised, and the recap can judge it.</p>
+  </header>
+
+  <section>
+    <h2>One run, one stage</h2>
+    <figure>
+      <svg viewBox="0 0 900 250" role="img" aria-label="A run picks one stage, from --stage or the latest stage whose data is there. It checks the data reaches the window end, the stage isn't written yet, and premarket is written when the stage needs it. If all pass it builds the stage from its time series and a copy of the earlier sections, appends it and saves. Otherwise it does nothing and prints why.">
+        <defs>
+          <marker id="a1" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>
+        </defs>
+        <rect class="box" x="10" y="60" width="150" height="60" rx="5"/>
+        <text class="code" x="22" y="86">pipeline.run</text>
+        <text class="code" x="22" y="102">trading</text>
+        <text class="tm" x="22" y="140">[--date] [--stage]</text>
+
+        <rect class="box" x="190" y="45" width="175" height="90" rx="5"/>
+        <text class="tb" x="202" y="68">Pick one stage</text>
+        <text class="tm" x="202" y="88">--stage → cfg.stage(name)</text>
+        <text class="tm" x="202" y="104">else → current_stage()</text>
+        <text class="tm" x="202" y="120">latest with SPY data there</text>
+
+        <rect class="box" x="395" y="35" width="205" height="110" rx="5"/>
+        <text class="tb" x="407" y="58">Checks</text>
+        <text class="t" x="407" y="80">data reaches the window end</text>
+        <text class="t" x="407" y="99">stage not already written</text>
+        <text class="t" x="407" y="118">premarket written</text>
+        <text class="tm" x="407" y="134">(opening range, recap only)</text>
+
+        <rect class="box" x="630" y="50" width="120" height="80" rx="5"/>
+        <text class="tb" x="642" y="73">Build</text>
+        <text class="tm" x="642" y="93">its time series</text>
+        <text class="tm" x="642" y="109">+ sections() copy</text>
+
+        <rect class="box" x="775" y="50" width="115" height="80" rx="5"/>
+        <text class="tb" x="787" y="73">Append</text>
+        <text class="tm" x="787" y="93">one section,</text>
+        <text class="tm" x="787" y="109">then save</text>
+
+        <rect class="frame" x="395" y="185" width="205" height="52" rx="5"/>
+        <text class="tb" x="407" y="207">No-op</text>
+        <text class="tm" x="407" y="225">prints why · file untouched</text>
+
+        <g marker-end="url(#a1)">
+          <line class="wire" x1="160" y1="90" x2="188" y2="90"/>
+          <line class="wire" x1="365" y1="90" x2="393" y2="90"/>
+          <line class="wire" x1="600" y1="90" x2="628" y2="90"/>
+          <line class="wire" x1="750" y1="90" x2="773" y2="90"/>
+          <line class="wire" x1="497" y1="145" x2="497" y2="183"/>
+        </g>
+        <text class="tm" x="603" y="78">all pass</text>
+        <text class="tm" x="505" y="170">any fails</text>
+      </svg>
+      <figcaption>There's no loop over stages. The live run takes the latest stage whose data is there; the backfill names each stage in turn. <code>sections()</code> returns a deep copy, so nothing a builder does to an earlier section can reach the file.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>How the day's file grows</h2>
+    <figure>
+      <svg viewBox="0 0 760 250" role="img" aria-label="Four runs across the session. The 09:00 run appends premarket; the 09:40 run appends open; the 10:05 run appends opening range; the 16:15 run appends recap. Sections written earlier are unchanged; later ones stay not available until their run.">
+        <text class="tm" x="225" y="30" text-anchor="middle">run 09:00</text>
+        <text class="tm" x="375" y="30" text-anchor="middle">run 09:40</text>
+        <text class="tm" x="525" y="30" text-anchor="middle">run 10:05</text>
+        <text class="tm" x="675" y="30" text-anchor="middle">run 16:15</text>
+
+        <text class="tb" x="10" y="64">premarket</text><text class="tm" x="10" y="78">ends 09:00</text>
+        <text class="tb" x="10" y="108">open</text><text class="tm" x="10" y="122">ends 09:35</text>
+        <text class="tb" x="10" y="152">opening_range</text><text class="tm" x="10" y="166">ends 10:00</text>
+        <text class="tb" x="10" y="196">recap</text><text class="tm" x="10" y="210">ends 16:00</text>
+
+        <!-- run 09:00 -->
+        <rect class="pm" x="160" y="48" width="130" height="32" rx="4" opacity="0.9"/><text class="inv" x="225" y="69" text-anchor="middle">appended</text>
+        <rect class="frame" x="160" y="92"  width="130" height="32" rx="4"/><text class="na" x="225" y="112" text-anchor="middle">not available</text>
+        <rect class="frame" x="160" y="136" width="130" height="32" rx="4"/><text class="na" x="225" y="156" text-anchor="middle">not available</text>
+        <rect class="frame" x="160" y="180" width="130" height="32" rx="4"/><text class="na" x="225" y="200" text-anchor="middle">not available</text>
+        <!-- run 09:40 -->
+        <rect class="box pms" x="310" y="48" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="375" y="68" text-anchor="middle">unchanged</text>
+        <rect class="op" x="310" y="92" width="130" height="32" rx="4" opacity="0.9"/><text class="inv" x="375" y="113" text-anchor="middle">appended</text>
+        <rect class="frame" x="310" y="136" width="130" height="32" rx="4"/><text class="na" x="375" y="156" text-anchor="middle">not available</text>
+        <rect class="frame" x="310" y="180" width="130" height="32" rx="4"/><text class="na" x="375" y="200" text-anchor="middle">not available</text>
+        <!-- run 10:05 -->
+        <rect class="box pms" x="460" y="48" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="525" y="68" text-anchor="middle">unchanged</text>
+        <rect class="box ops" x="460" y="92" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="525" y="112" text-anchor="middle">unchanged</text>
+        <rect class="or" x="460" y="136" width="130" height="32" rx="4" opacity="0.9"/><text class="inv" x="525" y="157" text-anchor="middle">appended</text>
+        <rect class="frame" x="460" y="180" width="130" height="32" rx="4"/><text class="na" x="525" y="200" text-anchor="middle">not available</text>
+        <!-- run 16:15 -->
+        <rect class="box pms" x="610" y="48" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="675" y="68" text-anchor="middle">unchanged</text>
+        <rect class="box ops" x="610" y="92" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="675" y="112" text-anchor="middle">unchanged</text>
+        <rect class="box ors" x="610" y="136" width="130" height="32" rx="4" stroke-width="2"/><text class="tm" x="675" y="156" text-anchor="middle">unchanged</text>
+        <rect class="rc" x="610" y="180" width="130" height="32" rx="4" opacity="0.9"/><text class="inv" x="675" y="201" text-anchor="middle">appended</text>
+
+        <line class="axis" x1="160" y1="228" x2="740" y2="228"/>
+        <text class="tm" x="160" y="244">A stage not yet written holds { status: "not_available", window_end, message }.</text>
+      </svg>
+      <figcaption>Each run is assumed to land just after a window end. The workflow commits <code>data/</code> after each run, so the next run starts from the file as it was left. A missed run leaves its stage missing for the day; the backfill fills it.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Who scores what</h2>
+    <figure>
+      <svg viewBox="0 0 900 205" role="img" aria-label="Premarket writes the watchlist, scored by _score_setups and shown in Steps 3 to 5. Opening range writes ORB setups only, scored the same way and shown on the Opening Range card. The recap grades both lists and tags each graded call with the stage that made it; the recap page looks each call up there.">
+        <defs>
+          <marker id="a3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto"><path class="arrowhead" d="M0,0 L8,4 L0,8 z"/></marker>
+        </defs>
+        <rect class="box" x="10" y="20" width="140" height="64" rx="5"/><rect class="pm" x="10" y="20" width="5" height="64"/>
+        <text class="code" x="26" y="56">premarket</text>
+        <rect class="box" x="10" y="120" width="140" height="64" rx="5"/><rect class="or" x="10" y="120" width="5" height="64"/>
+        <text class="code" x="26" y="156">opening_range</text>
+
+        <rect class="box" x="190" y="20" width="275" height="64" rx="5"/>
+        <text class="code" x="202" y="41">watchlist</text>
+        <text class="tm" x="202" y="58">gap · engulfing · outside day</text>
+        <text class="tm" x="202" y="74">_score_setups → trade page Steps 3–5</text>
+        <rect class="box" x="190" y="120" width="275" height="64" rx="5"/>
+        <text class="code" x="202" y="141">patterns</text>
+        <text class="tm" x="202" y="158">ORB setups only</text>
+        <text class="tm" x="202" y="174">_score_setups → Opening Range card</text>
+
+        <rect class="box" x="560" y="20" width="330" height="164" rx="5"/><rect class="rc" x="560" y="20" width="5" height="164"/>
+        <text class="code" x="578" y="46">recap.patterns</text>
+        <text class="t" x="578" y="72">every call graded against the session</text>
+        <text class="code" x="578" y="98">stage: "premarket"</text>
+        <text class="code" x="578" y="116">     | "opening_range"</text>
+        <text class="tm" x="578" y="146">The recap page looks each call up in</text>
+        <text class="tm" x="578" y="162">the stage that made it.</text>
+
+        <g marker-end="url(#a3)">
+          <line class="wire" x1="150" y1="52"  x2="188" y2="52"/>
+          <line class="wire" x1="150" y1="152" x2="188" y2="152"/>
+          <line class="wire" x1="465" y1="52"  x2="558" y2="52"/>
+          <line class="wire" x1="465" y1="152" x2="558" y2="152"/>
+        </g>
+        <text class="tm" x="480" y="44">graded</text>
+        <text class="tm" x="480" y="144">graded</text>
+      </svg>
+      <figcaption>Before this change the opening range copied the premarket watchlist and scored everything, so Steps 4–5 waited until 10:00. Now each stage scores only its own calls, and Steps 4–5 appear with premarket.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>SessionFile</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Member</th><th>Does</th></tr></thead>
+        <tbody>
+          <tr><td><code>open(cache_dir, session_date, stages)</code></td><td>Loads the day's file if it exists. Any stage missing from it starts as not available.</td></tr>
+          <tr><td><code>has(name)</code></td><td>True once the stage is written, meaning its section isn't the not-available one.</td></tr>
+          <tr><td><code>sections()</code></td><td>A deep copy of every section, for the builder to read.</td></tr>
+          <tr><td><code>append(name, section)</code></td><td>Adds the stage's section. Raises if it's already written.</td></tr>
+          <tr><td><code>save(generated)</code></td><td>Writes <code>session_date</code>, <code>generated</code> (time of the last write), <code>market_closed</code> and the four sections in order.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Entry points</h2>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Caller</th><th>How it runs the generator</th></tr></thead>
+        <tbody>
+          <tr><td><code>pipeline.run generate</code></td><td>The workflow's step. Takes the latest stage whose data is there.</td></tr>
+          <tr><td><code>pipeline.run trading --stage NAME</code></td><td>Just that stage, for the date's session (<code>--date</code>, default latest).</td></tr>
+          <tr><td><code>scripts/backfill_trading_history.py</code></td><td>Every stage, in order, per trading day. Without <code>--force</code> it fills in missing stages; <code>--force</code> deletes the day's file first.</td></tr>
+          <tr><td><code>tests/test_trading_stages.py</code></td><td>Replays the latest stored session into one file at 09:00, 09:40, 13:00 and 17:00. Checks which sections exist, that earlier sections are unchanged byte-for-byte, and that each equals a fresh backfill. Also checks that the previous session backfills every stage and that a stage is written once.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>Rules</h2>
+    <ul class="rules">
+      <li>A stage is calculated once. Only a backfill goes backwards.</li>
+      <li>A stage reads its own time series (bars ended by its window end) plus earlier sections; it never recomputes them.</li>
+      <li>Opening range and recap need premarket written; otherwise the run does nothing.</li>
+      <li>Each stage scores only its own calls; the recap grades them from the file.</li>
+      <li>Intraday bar files under <code>data/cache/intraday/</code> are still written on every run. They aren't part of the append-only record.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Open</h2>
+    <div class="note">
+      <p><strong>Workflow slots.</strong> <code>update-data-v2.yml</code> runs at 09:00 and 16:15 ET only, so live days get premarket and recap but never open or opening range. It needs 09:35 and 10:00 ET slots.</p>
+      <p><strong>Crypto in the recap.</strong> BTC and ETH have no closed daily bar at 16:00, so their calls, ORB included, aren't graded. This behaviour predates the change.</p>
+      <p><strong>Regenerate.</strong> Run <code>backfill_trading_history.py --days 60 --force</code> once this lands. The default is still 90 days.</p>
+    </div>
+  </section>
+</main>

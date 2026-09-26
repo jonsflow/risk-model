@@ -1,9 +1,10 @@
 // js/pages/trade.js — Trade Recommendations page (ES module).
 //
 // The live page for one session. It loads trading_signals_<date>.json and
-// renders each stage as it lands: premarket (Steps 1-3), the open, and the
-// opening range (Steps 4-5). A stage whose data isn't there yet shows the
-// generator's not-available message. The recap is pages/trade_recap.html.
+// renders each stage as it lands: premarket (Steps 1-5 — the watchlist is
+// scored at premarket), the open, and the opening range (its own ORB setups,
+// scored). A stage whose data isn't there yet shows the generator's
+// not-available message. The recap is pages/trade_recap.html.
 import { renderNav } from '../components/Navigation.js';
 import { todayET, isWeekend, hasStage, stageMessage, loadSession, gradeColor, gradeLabel,
          getDotsHTML, noticeHTML, fillSymbolSelector } from '../core/trade-common.js';
@@ -191,8 +192,8 @@ async function loadLogicTab() {
 // =============================================================================
 // One flat view over the session file's stages, so the step renderers don't
 // each walk the file. Every field here comes from a stage that has landed:
-// premarket fields from `premarket`, the open from `open`, scored setups from
-// `opening_range`. The recap is not read on this page.
+// premarket fields and the scored watchlist from `premarket`, the open from
+// `open`, ORB setups from `opening_range`. The recap is not read on this page.
 
 function buildView(s) {
   const pm = s.premarket || {};
@@ -605,13 +606,13 @@ function renderPatternScanner(view) {
 // =============================================================================
 
 function scoreConfluences(view) {
-  if (!hasStage(session, 'opening_range')) {
-    document.getElementById('step4Content').innerHTML =
-      `<div class="muted">${stageMessage(session, 'opening_range')}</div>`;
-    return [];
-  }
-  const patterns = view.opening_range.patterns || [];
+  const scored = scoredSetups(view, view.watchlist);
+  renderConfluenceCards(view, scored);
+  return scored;
+}
 
+// The selected symbol's scored setups that qualify, best first.
+function scoredSetups(view, patterns) {
   // The score is computed and stamped by the generator from pre-open inputs
   // only, so it is a fact about that morning rather than something re-derived
   // here against whatever the cache happens to hold now. Scoring in the browser
@@ -619,7 +620,7 @@ function scoreConfluences(view) {
   // afternoon's score differ from the morning's and let a backtest replaying
   // these files rank setups using the outcome. Caches written before the score
   // existed have no `confluence` and are skipped.
-  const scored = patterns
+  return patterns
     .filter(p => p.symbol === selectedSymbol && p.confluence)
     .map(p => {
       const sym      = p.symbol;
@@ -637,7 +638,9 @@ function scoreConfluences(view) {
     .sort((a, b) => b.score - a.score)
     // `qualifies` is the generator's verdict, from sizing.min_confluence.
     .filter(x => x.qualifies);
+}
 
+function renderConfluenceCards(view, scored) {
   let html = '';
 
   if (scored.length === 0) {
@@ -685,7 +688,6 @@ function scoreConfluences(view) {
   }
 
   document.getElementById('step4Content').innerHTML = html;
-  return scored;
 }
 
 // =============================================================================
@@ -693,11 +695,6 @@ function scoreConfluences(view) {
 // =============================================================================
 
 function renderRecommendations(view, scored) {
-  if (!hasStage(session, 'opening_range')) {
-    document.getElementById('step5Content').innerHTML =
-      `<div class="muted">${stageMessage(session, 'opening_range')}</div>`;
-    return;
-  }
   let html = lowProbabilityHTML(view);
 
   if (scored.length === 0) {
@@ -896,7 +893,30 @@ function renderOpeningRange(view) {
       <div class="pill"><div class="muted">Index Alignment</div>
         <strong style="color:${alColor};">${al.label || '–'}</strong>
         <div class="muted" style="font-size:0.8em; margin-top:4px;">${alDetail}</div></div>
-    </div>`;
+    </div>
+    ${orbSetupsHTML(view)}`;
+}
+
+// The opening range's own calls: ORB setups, scored like the premarket watchlist.
+function orbSetupsHTML(view) {
+  const setups = (view.opening_range.patterns || [])
+    .filter(p => p.symbol === selectedSymbol && p.confluence);
+  if (!setups.length) {
+    return `<div class="muted" style="font-size:0.85em; margin-top:10px;">No ORB setup for ${selectedSymbol}.</div>`;
+  }
+  return setups.map(p => {
+    const { score, max } = p.confluence;
+    const sc = score >= 6 ? '#10b981' : score >= 4 ? '#f59e0b' : '#3b82f6';
+    return `
+      <div style="margin-top:10px; font-size:0.85em; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <strong>${p.pattern}</strong>
+        <span style="background:${sc}; color:white; padding:2px 8px; border-radius:4px; font-weight:bold;">
+          ${score}/${max} ${getDotsHTML(score, max)}</span>
+        <span style="color:${p.qualifies ? '#10b981' : '#6b7280'};">${p.qualifies ? 'Qualifies' : 'Below minimum confluence'}</span>
+        <span class="muted">${p.sizing?.tier_label || ''}</span>
+        <span class="muted">${p.notes || ''}</span>
+      </div>`;
+  }).join('');
 }
 
 // =============================================================================

@@ -6,7 +6,7 @@ Usage:
   python -m pipeline.run generate       # generate all caches from SQLite
   python -m pipeline.run all            # fetch + generate
   python -m pipeline.run seed           # seed SQLite from existing v1 CSVs (one-time)
-  python -m pipeline.run trading [--date YYYY-MM-DD]
+  python -m pipeline.run trading [--date YYYY-MM-DD] [--stage NAME]
 """
 
 import argparse
@@ -52,7 +52,7 @@ def cmd_trading(args):
     from datetime import datetime
     target_date = datetime.strptime(args.date, '%Y-%m-%d').date() if args.date else None
     gen = TradingGenerator()
-    gen.generate(target_date=target_date)
+    gen.generate(target_date=target_date, stage_name=args.stage)
 
 
 def main():
@@ -66,6 +66,9 @@ def main():
 
     trading_parser = sub.add_parser('trading', help='Generate trading signals only')
     trading_parser.add_argument('--date', default=None, help='Target date YYYY-MM-DD')
+    trading_parser.add_argument('--stage', default=None,
+                                help='premarket | open | opening_range | recap '
+                                     '(default: the latest stage whose data is there)')
 
     args = parser.parse_args()
 

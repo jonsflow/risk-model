@@ -9,11 +9,12 @@ one file per session with one section per stage:
   opening_range  + 5-min bars through the opening range
   recap          the finished session, once its daily bar is complete
 
-Each stage reads only data that ended by its window end, whenever the run happens —
-live, late or in a backfill — so recomputing a stage always gives the same
-answer and later stages never replace earlier ones. A stage whose data does
-not exist yet is empty. Window ends come from the `stages` block in
-config/trading_config.json.
+Each run computes one stage — the one named, or the latest whose data is
+there — and appends it to the day's file. A stage is written once; later
+stages read earlier sections but never recalculate them. Each stage reads only
+data that ended by its window end, so a backfill gives the same answer as the
+live run. A stage not yet written is marked not available. Window ends come
+from the `stages` block in config/trading_config.json.
 
 Daily bars are read only once closed (is_complete, stamped at ingest).
 Timezone questions go through pipeline/market_time.py.
@@ -22,6 +23,7 @@ Timezone questions go through pipeline/market_time.py.
 import json
 import math
 import statistics
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -37,8 +39,8 @@ CACHE_DIR = Path("data/cache")
 
 
 class TradingGenerator(BaseGenerator):
-    def generate(self, target_date=None) -> None:
-        _generate_trading_signals(self.db, self.cache_dir, target_date)
+    def generate(self, target_date=None, stage_name=None) -> None:
+        _generate_trading_signals(self.db, self.cache_dir, target_date, stage_name)
 
 
 # ------------------------------------------------------------------
@@ -53,6 +55,13 @@ class TradingConfig:
     sizing: dict
     targets: dict
     stages: list        # [Stage], in session order
+
+    def stage(self, name):
+        for st in self.stages:
+            if st.name == name:
+                return st
+        raise ValueError(f"Unknown stage {name!r} — expected one of "
+                         f"{', '.join(st.name for st in self.stages)}")
 
 
 def _load_config() -> TradingConfig:
@@ -429,6 +438,12 @@ class PriceHistory:
         return TimeSeries(symbol, stage, True,
                           {tf: _ended_by(by_tf.get(tf, []), tf, end) for tf in stage.timeframes})
 
+    def current_stage(self, stages):
+        """The latest stage whose reference-symbol data is there, or None."""
+        available = [st for st in stages
+                     if self.get_time_series(REFERENCE_SYMBOL, st).available]
+        return available[-1] if available else None
+
     def _reaches(self, by_tf, stage, end):
         """Is every timeframe the stage reads there through its window end?
         Timeframes never collected for this symbol (VIX has no 5-min) are
@@ -472,6 +487,47 @@ def _not_available(stage):
         'message': f"{stage.label} isn't available yet — it needs data through "
                    f"{stage.window_end:%H:%M} ET.",
     }
+
+
+class SessionFile:
+    """The day's file, trading_signals_<date>.json, as an append-only record:
+    one section per stage, each written once. A stage not yet written holds
+    the standard not-available section."""
+
+    def __init__(self, path, session_date, stages, doc):
+        self.path = path
+        self.session_date = session_date
+        self.stages = stages
+        self._doc = doc
+
+    @classmethod
+    def open(cls, cache_dir, session_date, stages):
+        path = Path(cache_dir) / f"trading_signals_{session_date.isoformat()}.json"
+        doc = json.loads(path.read_text()) if path.exists() else {}
+        for st in stages:
+            doc.setdefault(st.name, _not_available(st))
+        return cls(path, session_date, stages, doc)
+
+    def has(self, name):
+        return self._doc[name].get('status') != 'not_available'
+
+    def sections(self):
+        """A copy of every stage's section — nothing a builder does to it
+        reaches the file."""
+        return {st.name: deepcopy(self._doc[st.name]) for st in self.stages}
+
+    def append(self, name, section):
+        if self.has(name):
+            raise ValueError(f"{self.session_date} {name} is already written")
+        self._doc[name] = section
+
+    def save(self, generated):
+        doc = {'session_date':  self.session_date.isoformat(),
+               'generated':     generated.isoformat(),
+               'market_closed': self.session_date.weekday() >= 5,
+               **{st.name: self._doc[st.name] for st in self.stages}}
+        with open(self.path, 'w') as f:
+            json.dump(doc, f, indent=2)
 
 
 def _window(bars, session_date, start, end):
@@ -937,6 +993,10 @@ def _stage_premarket(cfg, stage, S, series, sections):
                 'posture_factor': cfg.sizing['day_posture'].get(grade, 1.0),
             }
             section['vol_regime'] = _classify_vol_regime(prior, atr)
+
+    preopen = {sym: v['preopen'] for sym, v in section['symbols'].items()}
+    _score_setups(cfg, section['watchlist'], preopen,
+                  section.get('day_quality', {}).get('grade'))
     return section
 
 
@@ -1068,11 +1128,27 @@ def _plan_levels(direction, entry, atr, targets_config):
     return plan
 
 
+def _score_setups(cfg, patterns, preopen_by_symbol, grade):
+    """Confluence, sizing and plan for each setup, in place. A setup whose
+    symbol has no premarket indicators is left unscored."""
+    for p in patterns:
+        pre = preopen_by_symbol.get(p['symbol'])
+        conf = _score_confluence(p['direction'], pre, grade, p.get('regime_match'))
+        if not conf:
+            continue
+        p['confluence'] = conf
+        p['qualifies']  = conf['score'] >= cfg.sizing['min_confluence']
+        p['sizing']     = _size_trade(grade, conf['score'], cfg.sizing)
+        entry = (p.get('levels') or {}).get('entry')
+        p['plan'] = _plan_levels(p['direction'], entry if isinstance(entry, (int, float)) else None,
+                                 pre['atr_14'], cfg.targets)
+    return patterns
+
+
 def _stage_opening_range(cfg, stage, S, series, sections):
     window_end = stage.window_end
     premarket = sections['premarket']
     targets = cfg.targets
-    sizing  = cfg.sizing
     favored = premarket['regime'].get('favored', {}).get('patterns', [])
     grade   = premarket.get('day_quality', {}).get('grade')
 
@@ -1083,7 +1159,7 @@ def _stage_opening_range(cfg, stage, S, series, sections):
         'symbols': {},
         'patterns': [],
     }
-    patterns = [dict(p) for p in premarket.get('watchlist', [])]
+    patterns = []
 
     for symbol in cfg.symbols:
         pre = premarket['symbols'].get(symbol)
@@ -1115,18 +1191,8 @@ def _stage_opening_range(cfg, stage, S, series, sections):
                 **_pattern_keys(['orb'], favored),
             })
 
-    for p in patterns:
-        pre = premarket['symbols'].get(p['symbol'], {}).get('preopen')
-        conf = _score_confluence(p['direction'], pre, grade, p.get('regime_match'))
-        if not conf:
-            continue
-        p['confluence'] = conf
-        p['qualifies']  = conf['score'] >= sizing['min_confluence']
-        p['sizing']     = _size_trade(grade, conf['score'], sizing)
-        entry = (p.get('levels') or {}).get('entry')
-        p['plan'] = _plan_levels(p['direction'], entry if isinstance(entry, (int, float)) else None,
-                                 pre['atr_14'], targets)
-    section['patterns'] = patterns
+    preopen = {sym: v['preopen'] for sym, v in premarket['symbols'].items()}
+    section['patterns'] = _score_setups(cfg, patterns, preopen, grade)
     return section
 
 
@@ -1274,14 +1340,15 @@ def _stage_recap(cfg, stage, S, series, sections):
             spy['eod_outcome'],
             dq.get('grade'), dq.get('scores', {}).get('total'))
 
-    calls = opening_range.get('patterns') if opening_range else premarket.get('watchlist', [])
-    for p in calls or []:
+    calls = [('premarket', p) for p in premarket.get('watchlist', [])] + \
+            [('opening_range', p) for p in opening_range.get('patterns', [])]
+    for stage_name, p in calls:
         sym = p['symbol']
         if sym not in section['symbols']:
             continue
         section['patterns'].append({
             'symbol': sym, 'pattern': p['pattern'], 'direction': p['direction'],
-            'stage': 'opening_range' if opening_range else 'premarket',
+            'stage': stage_name,
             'outcome': _resolve_pattern(p, _session_bar(series[sym].daily, S),
                                         section['symbols'][sym]['eod_outcome']),
         })
@@ -1300,44 +1367,49 @@ STAGE_BUILDERS = {
 }
 
 
-def _generate_trading_signals(db, cache_dir, target_date=None):
+# Stages whose builder reads the premarket section.
+NEEDS_PREMARKET = {'opening_range', 'recap'}
+
+
+def _generate_trading_signals(db, cache_dir, target_date=None, stage_name=None):
+    """Compute one stage and append it to the day's file: `stage_name` if
+    given, else the latest stage whose data is there. Does nothing if that
+    stage is already written or its data isn't there."""
     cfg = _load_config()
     if not cfg.symbols:
         raise ValueError("No trading symbols in trading_config.json")
 
-    print(f"Generating trading signals for {len(cfg.symbols)} symbols...")
     now_utc = datetime.now(timezone.utc)
-
     symbols = cfg.symbols + ['VIX']
     history = PriceHistory.load(db, symbols, through=target_date)
     session_date = history.session_date or now_utc.date()
 
-    # Stages run in session order. Each reads its own time series per symbol
-    # and the sections before it. A stage whose data isn't there yet gets the
-    # standard not-available section.
-    sections = {}
-    for stage in cfg.stages:
-        series = {s: history.get_time_series(s, stage) for s in symbols}
-        if not series[REFERENCE_SYMBOL].available:
-            sections[stage.name] = _not_available(stage)
-            continue
-        available = {s: ts for s, ts in series.items() if ts.available}
-        sections[stage.name] = STAGE_BUILDERS[stage.name](cfg, stage, session_date, available, sections)
-
-    output = {
-        'session_date':  session_date.isoformat(),
-        'generated':     now_utc.isoformat(),
-        'market_closed': session_date.weekday() >= 5,
-        **sections,
-    }
-
-    path = cache_dir / f"trading_signals_{session_date.isoformat()}.json"
-    with open(path, 'w') as f:
-        json.dump(output, f, indent=2)
-    print(f"✓ {session_date} stages: "
-          f"{', '.join(k for k, v in sections.items() if v.get('status') != 'not_available')} → {path}")
-
     _emit_intraday_bars(cache_dir, cfg.symbols, history, session_date)
+
+    stage = cfg.stage(stage_name) if stage_name else history.current_stage(cfg.stages)
+    if stage is None:
+        print(f"· {session_date}: no stage's data is there yet")
+        return
+
+    file = SessionFile.open(cache_dir, session_date, cfg.stages)
+    if file.has(stage.name):
+        print(f"· {session_date} {stage.name} already written")
+        return
+    sections = file.sections()
+    if stage.name in NEEDS_PREMARKET and not file.has('premarket'):
+        print(f"· {session_date} {stage.name} skipped — premarket isn't written")
+        return
+
+    series = {s: history.get_time_series(s, stage) for s in symbols}
+    if not series[REFERENCE_SYMBOL].available:
+        print(f"· {session_date} {stage.name}: data through "
+              f"{stage.window_end:%H:%M} ET isn't there yet")
+        return
+    available = {s: ts for s, ts in series.items() if ts.available}
+
+    file.append(stage.name, STAGE_BUILDERS[stage.name](cfg, stage, session_date, available, sections))
+    file.save(now_utc)
+    print(f"✓ {session_date} {stage.name} → {file.path}")
 
 
 def _emit_intraday_bars(cache_dir, symbols, history, session_date):
